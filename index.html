@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Корованы: Тёмная дорога</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="640" height="360"></canvas>
+
+    <div id="hud">
+      <div id="vitals">
+        <div class="bar"><div id="hp-fill" class="fill hp"></div><span id="hp-text">100 / 100</span></div>
+        <div class="bar"><div id="st-fill" class="fill st"></div><span id="st-text">100</span></div>
+        <div id="wanted" class="hidden"></div>
+      </div>
+
+      <div id="topright">
+        <div id="gold">0 зм.</div>
+        <div id="objective"></div>
+      </div>
+
+      <div id="crosshair"><span></span></div>
+      <div id="prompt"></div>
+      <div id="progress" class="hidden"><div id="progress-fill"></div></div>
+      <div id="messages"></div>
+      <div id="controls-hint">WASD — идти · Shift — бег · Ctrl — крадучись · E — действие · ЛКМ — удар · I — помощь · Esc — пауза</div>
+    </div>
+
+    <div id="start" class="overlay">
+      <div class="panel">
+        <h1>КОРОВАНЫ</h1>
+        <p class="sub">Тёмная дорога · демо</p>
+        <p>Вы — бедный искатель приключений. На северной стоянке стоит караван. Обчистите фургон или перебейте охрану, продайте добычу скупщику и соберите <b>300 золотых</b>.</p>
+        <ul class="controls">
+          <li><kbd>WASD</kbd> — движение</li>
+          <li><kbd>Мышь</kbd> — обзор</li>
+          <li><kbd>Shift</kbd> — бег, <kbd>Ctrl</kbd> — крадучись</li>
+          <li><kbd>E</kbd> — взаимодействие / обыск</li>
+          <li><kbd>ЛКМ</kbd> — удар, <kbd>I</kbd> — помощь</li>
+        </ul>
+        <button id="start-btn">Войти в игру</button>
+        <p class="hint">Клик по экрану захватывает мышь. Esc освобождает её.</p>
+      </div>
+    </div>
+
+    <div id="pause" class="overlay hidden">
+      <div class="panel">
+        <h2>Пауза</h2>
+        <p>Игра остановлена. Мышь освобождена.</p>
+        <button id="resume-btn">Продолжить</button>
+      </div>
+    </div>
+
+    <div id="trade" class="overlay hidden">
+      <div class="panel wide">
+        <h2>Скупщик Мардо</h2>
+        <p class="muted">«Товар без вопросов, вопросы без товара».</p>
+        <div id="trade-gold" class="trade-gold"></div>
+        <div class="trade-grid">
+          <div>
+            <h3>Добыча</h3>
+            <div id="trade-loot" class="list"></div>
+          </div>
+          <div>
+            <h3>Улучшения</h3>
+            <div id="trade-upgrades" class="list"></div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="sell-btn">Продать всё</button>
+          <button id="fine-btn">Уладить с властями</button>
+          <button id="close-trade">Уйти</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="help" class="overlay hidden">
+      <div class="panel">
+        <h2>Как играть</h2>
+        <ul class="controls">
+          <li><kbd>WASD</kbd> — движение, <kbd>Shift</kbd> — бег, <kbd>Ctrl</kbd> — крадучись</li>
+          <li><kbd>E</kbd> — открыть скупщика или обыскать фургон (удерживайте)</li>
+          <li><kbd>ЛКМ</kbd> — удар мечом</li>
+          <li><kbd>I</kbd> — закрыть помощь, <kbd>Esc</kbd> — пауза</li>
+        </ul>
+        <p>Стража замечает вас быстрее, если вы бежите и находитесь близко. Крадучись, можно подобраться к фургону и вынести груз без боя.</p>
+        <p>После ограбления вернитесь к Мардо в деревне и продайте добычу. Штраф за розыск можно оплатить там же.</p>
+        <button id="close-help">Понятно</button>
+      </div>
+    </div>
+
+    <div id="end" class="overlay hidden">
+      <div class="panel">
+        <h2 id="end-title"></h2>
+        <p id="end-text"></p>
+        <div class="row">
+          <button id="continue-btn" class="hidden">Продолжить играть</button>
+          <button id="restart-btn">Начать заново</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

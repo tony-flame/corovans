@@ -1,0 +1,13 @@
+{
+  "name": "corovans",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Корованы: Тёмная дорога — демо-игра в духе Daggerfall",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "check": "node scripts/check.mjs",
+    "test": "node --test",
+    "verify": "npm run check && npm test"
+  }
+}
