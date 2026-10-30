@@ -1,11 +1,21 @@
 import { buildTextures, TEX_SIZE } from "./textures.js";
 import { buildSprites } from "./sprites.js";
 import { MAP_W, MAP_H, TILE } from "./world.js";
+import { castRay } from "./ray.js";
+import { quantize, murk, wallOcclusion, applyGrain, vignette } from "./dither.js";
+import { sampleLight } from "./lighting.js";
+import { dropCount, dropPosition, dropLength, skyTint } from "./weather.js";
 
 const SCREEN_W = 640;
 const SCREEN_H = 360;
 const FOV_PLANE = 0.66;
 const MAX_DIST = 40;
+
+// Уровней на канал: меньше — грубее и «аутентичнее», больше — чище.
+const DITHER_LEVELS = 16;
+
+// Освещённость по фазам суток: множитель к цвету сцены.
+const LIGHT_LEVELS = { dawn: 0.82, day: 1, dusk: 0.72, night: 0.45 };
 
 function pack(r, g, b) {
   return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
@@ -24,17 +34,73 @@ export class Renderer {
     this.textures = buildTextures();
     this.sprites = buildSprites();
     this.fog = { r: 58, g: 56, b: 48 };
+    this.light = 1;
+    this.lightmap = null;
+    this.ditherStrength = 0.28;
+  }
+
+  // Финальный проход: виньетка и зерно. Без этого картинка «слишком чистая».
+  finishFrame() {
+    const data = this.imageData.data;
+    for (let y = 0; y < SCREEN_H; y++) {
+      const row = y * SCREEN_W;
+      for (let x = 0; x < SCREEN_W; x++) {
+        const i = (row + x) * 4;
+        const v = vignette(x, y, SCREEN_W, SCREEN_H, 0.2);
+        data[i] = applyGrain(data[i] * v, x, y, 0, 0.5);
+        data[i + 1] = applyGrain(data[i + 1] * v, x, y, 1, 0.5);
+        data[i + 2] = applyGrain(data[i + 2] * v, x, y, 2, 0.5);
+      }
+    }
+  }
+
+  // Дождь: вертикальные штрихи, детерминированные от индекса капли и времени.
+  drawRain(weather, time, horizon) {
+    if (!weather || weather.intensity <= 0.01) return;
+    const ctx = this.ctx;
+    const count = dropCount(weather, SCREEN_W);
+    const tint = skyTint(weather);
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(190, 205, 215, ${0.18 + weather.intensity * 0.3})`;
+    ctx.lineWidth = weather.intensity > 0.7 ? 1.4 : 1;
+    ctx.beginPath();
+
+    for (let i = 0; i < count; i++) {
+      const drop = dropPosition(i, time, weather.wind, SCREEN_W, SCREEN_H);
+      const len = dropLength(weather, drop.speedY);
+      // Капля летит по ветру: рисуем отрезок вдоль направления падения.
+      const dx = (drop.speedX / drop.speedY) * len;
+      ctx.moveTo(drop.x, drop.y);
+      ctx.lineTo(drop.x + dx, drop.y + len);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Мокрая дымка у горизонта.
+    if (tint.grey > 0.02) {
+      ctx.save();
+      ctx.fillStyle = `rgba(150, 160, 168, ${tint.grey * 0.28})`;
+      ctx.fillRect(0, Math.max(0, horizon - 40), SCREEN_W, 80);
+      ctx.restore();
+    }
   }
 
   render(state) {
-    const { world, player, time, hurtFlash = 0 } = state;
-    const horizon = SCREEN_H * 0.5 + player.bobY;
-    this.renderSky(player, horizon);
+    const { world, player, time, hurtFlash = 0, light = "day", lightmap = null, weather = null } = state;
+    // Прыжок поднимает камеру, наклон сдвигает горизонт (shear), а не поворачивает.
+    this.jumpZ = player.jumpZ || 0;
+    const horizon = SCREEN_H * 0.5 + player.bobY - (player.pitch || 0);
+    this.light = LIGHT_LEVELS[light] !== undefined ? LIGHT_LEVELS[light] : 1;
+    this.lightmap = lightmap;
+    this.renderSky(player, horizon, weather);
     this.renderFloor(world, player, horizon);
     this.renderWalls(world, player, horizon);
+    this.finishFrame();
 
     this.ctx.putImageData(this.imageData, 0, 0);
-    this.drawSprites(world, player, horizon, time);
+    this.drawSprites(world, player, horizon, time, state);
+    this.drawRain(state.weather, time, horizon);
     if (state.started) this.drawWeapon(player, time);
 
     if (hurtFlash > 0) {
@@ -48,10 +114,23 @@ export class Renderer {
     }
   }
 
-  renderSky(player, horizon) {
+  renderSky(player, horizon, weather = null) {
     const buf = this.buffer;
-    const top = [24, 31, 46];
-    const bottom = [132, 116, 88];
+    const tint = skyTint(weather);
+    const dim = tint.dim;
+    const grey = tint.grey;
+
+    // Дождь делает небо серее и темнее.
+    const top = [
+      24 * dim + grey * 70,
+      31 * dim + grey * 74,
+      46 * dim + grey * 78,
+    ];
+    const bottom = [
+      132 * dim + grey * 96,
+      116 * dim + grey * 100,
+      88 * dim + grey * 104,
+    ];
     const h = Math.max(1, Math.floor(horizon));
 
     for (let y = 0; y < h; y++) {
@@ -88,7 +167,7 @@ export class Renderer {
     const rayDirY0 = dirY - planeY;
     const rayDirX1 = dirX + planeX;
     const rayDirY1 = dirY + planeY;
-    const posZ = 0.5 * SCREEN_H;
+    const posZ = 0.5 * SCREEN_H + this.jumpZ;
     const floors = this.textures.floors;
     const map = world.map;
 
@@ -104,11 +183,12 @@ export class Renderer {
       let floorY = player.y + rowDistance * rayDirY0;
 
       const fogT = Math.max(0, Math.min(0.8, (rowDistance - 7) / 34));
-      const shade = Math.max(0.34, 1 - rowDistance * 0.028);
+      const rowShade = Math.max(0.34, 1 - rowDistance * 0.028) * this.light;
       const fr = this.fog.r * fogT;
       const fg = this.fog.g * fogT;
       const fb = this.fog.b * fogT;
       const row = y * SCREEN_W;
+      const useLight = Boolean(this.lightmap);
 
       for (let x = 0; x < SCREEN_W; x++) {
         const cx = Math.floor(floorX);
@@ -119,10 +199,18 @@ export class Renderer {
         const tx = ((floorX - cx) * TEX_SIZE) | 0;
         const ty = ((floorY - cy) * TEX_SIZE) | 0;
         const c = tex[(ty & 63) * TEX_SIZE + (tx & 63)];
-        const r = (c & 255) * shade * (1 - fogT) + fr;
-        const g = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
-        const b = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
-        buf[row + x] = pack(r | 0, g | 0, b | 0);
+        const lightHere = useLight ? sampleLight(this.lightmap, floorX, floorY) : 1;
+        const shade = rowShade * lightHere;
+        const sr = (c & 255) * shade * (1 - fogT) + fr;
+        const sg = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
+        const sb = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
+
+        const murked = murk(sr, sg, sb, 0.16);
+        buf[row + x] = pack(
+          quantize(murked[0], DITHER_LEVELS, x, y, this.ditherStrength),
+          quantize(murked[1], DITHER_LEVELS, x, y, this.ditherStrength),
+          quantize(murked[2], DITHER_LEVELS, x, y, this.ditherStrength)
+        );
         floorX += stepX;
         floorY += stepY;
       }
@@ -131,7 +219,6 @@ export class Renderer {
 
   renderWalls(world, player, horizon) {
     const buf = this.buffer;
-    const map = world.map;
     const walls = this.textures.walls;
 
     for (let x = 0; x < SCREEN_W; x++) {
@@ -139,102 +226,72 @@ export class Renderer {
       const rayDirX = player.dirX + player.planeX * cameraX;
       const rayDirY = player.dirY + player.planeY * cameraX;
 
-      let mapX = Math.floor(player.x);
-      let mapY = Math.floor(player.y);
+      const ray = castRay(world, player.x, player.y, rayDirX, rayDirY, MAX_DIST);
 
-      const deltaDistX = Math.abs(rayDirX) < 1e-9 ? 1e30 : Math.abs(1 / rayDirX);
-      const deltaDistY = Math.abs(rayDirY) < 1e-9 ? 1e30 : Math.abs(1 / rayDirY);
-
-      let stepX;
-      let stepY;
-      let sideDistX;
-      let sideDistY;
-
-      if (rayDirX < 0) {
-        stepX = -1;
-        sideDistX = (player.x - mapX) * deltaDistX;
-      } else {
-        stepX = 1;
-        sideDistX = (mapX + 1 - player.x) * deltaDistX;
-      }
-      if (rayDirY < 0) {
-        stepY = -1;
-        sideDistY = (player.y - mapY) * deltaDistY;
-      } else {
-        stepY = 1;
-        sideDistY = (mapY + 1 - player.y) * deltaDistY;
-      }
-
-      let side = 0;
-      let tile = TILE.STONE;
-      let hit = false;
-      for (let i = 0; i < 80; i++) {
-        if (sideDistX < sideDistY) {
-          sideDistX += deltaDistX;
-          mapX += stepX;
-          side = 0;
-        } else {
-          sideDistY += deltaDistY;
-          mapY += stepY;
-          side = 1;
-        }
-        if (mapX < 0 || mapY < 0 || mapX >= MAP_W || mapY >= MAP_H) {
-          tile = TILE.STONE;
-          hit = true;
-          break;
-        }
-        tile = map[mapY * MAP_W + mapX];
-        if (tile === TILE.BRICK || tile === TILE.WOOD || tile === TILE.STONE) {
-          hit = true;
-          break;
-        }
-      }
-
-      let perpDist = side === 0 ? sideDistX - deltaDistX : sideDistY - deltaDistY;
-      if (!hit || perpDist < 0.05) perpDist = 0.05;
-      if (perpDist > MAX_DIST) perpDist = MAX_DIST;
+      // Промах больше не превращается в стену в упор: луч просто уходит в туман.
+      const perpDist = ray.dist;
       this.zBuffer[x] = perpDist;
 
+      if (!ray.hit) continue;
+
       const lineHeight = SCREEN_H / perpDist;
-      const drawStart = Math.floor(horizon - lineHeight / 2);
-      const drawEnd = Math.floor(horizon + lineHeight / 2);
+      // Камера поднята на jumpZ: верх и низ стены смещаются на jumpZ/perpDist,
+      // иначе стена отрывается от пола.
+      const topOffset = (SCREEN_H * 0.5 - this.jumpZ) / perpDist;
+      const bottomOffset = (SCREEN_H * 0.5 + this.jumpZ) / perpDist;
+      const wallTop = horizon - topOffset;
+      const drawStart = Math.floor(wallTop);
+      const drawEnd = Math.floor(horizon + bottomOffset);
 
-      let wallX;
-      if (side === 0) wallX = player.y + perpDist * rayDirY;
-      else wallX = player.x + perpDist * rayDirX;
-      wallX -= Math.floor(wallX);
-
-      let texX = Math.floor(wallX * TEX_SIZE);
+      const side = ray.side;
+      const tile = ray.tile;
+      let texX = Math.floor(ray.wallX * TEX_SIZE);
       if (side === 0 && rayDirX > 0) texX = TEX_SIZE - texX - 1;
       if (side === 1 && rayDirY < 0) texX = TEX_SIZE - texX - 1;
       texX = Math.max(0, Math.min(TEX_SIZE - 1, texX));
 
       const texture = walls[tile] || walls[TILE.STONE];
       const fogT = Math.max(0, Math.min(0.82, (perpDist - 6) / 32));
-      const shade = Math.max(0.28, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022));
+      const baseShade = Math.max(0.28, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022)) * this.light;
+      // Свет по тайлам: факелы, костёр, окна. Интерполяция уже внутри.
+      const tileLight = sampleLight(this.lightmap, ray.mapX + 0.5, ray.mapY + 0.5);
       const fr = this.fog.r * fogT;
       const fg = this.fog.g * fogT;
       const fb = this.fog.b * fogT;
 
       const y0 = Math.max(0, drawStart);
       const y1 = Math.min(SCREEN_H - 1, drawEnd);
-      const step = TEX_SIZE / lineHeight;
-      let texPos = (y0 - horizon + lineHeight / 2) * step;
+      const step = TEX_SIZE / (drawEnd - drawStart);
+      let texPos = (y0 - wallTop) * step;
+      const span = Math.max(1, drawEnd - drawStart);
 
       for (let y = y0; y <= y1; y++) {
         const texY = ((texPos | 0) & 63);
         texPos += step;
         const c = texture[texY * TEX_SIZE + texX];
-        const r = (c & 255) * shade * (1 - fogT) + fr;
-        const g = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
-        const b = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
-        buf[y * SCREEN_W + x] = pack(r | 0, g | 0, b | 0);
+
+        // Затенение к полу: стена перестаёт быть плоской.
+        const occlusion = wallOcclusion((y - wallTop) / span, 0.4);
+        const shade = baseShade * occlusion * tileLight;
+
+        const sr = (c & 255) * shade * (1 - fogT) + fr;
+        const sg = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
+        const sb = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
+
+        // Подмес мутного сумрака в тени и дизеринг каналов.
+        const murked = murk(sr, sg, sb, 0.16);
+        const r = quantize(murked[0], DITHER_LEVELS, x, y, this.ditherStrength);
+        const g = quantize(murked[1], DITHER_LEVELS, x, y, this.ditherStrength);
+        const b = quantize(murked[2], DITHER_LEVELS, x, y, this.ditherStrength);
+        buf[y * SCREEN_W + x] = pack(r, g, b);
       }
     }
   }
 
-  drawSprites(world, player, horizon, time) {
+  drawSprites(world, player, horizon, time, state = {}) {
     const ctx = this.ctx;
+    const suspicionSource = state.suspicionSource || ((actor) => actor.suspicion);
+    const showSuspicion = Boolean(state.showSuspicion);
     const list = [];
     for (const prop of world.props) {
       list.push({
@@ -244,24 +301,58 @@ export class Renderer {
         scale: prop.scale,
         bob: 0,
         alert: false,
+        actor: null,
       });
     }
     for (const actor of world.actors) {
-      if (actor.kind === "merchant") {
-        list.push({ x: actor.x, y: actor.y, sprite: "merchant", scale: 0.94, bob: 0, alert: false });
+      if (actor.kind === "merchant" || actor.kind === "courtesan") {
+        list.push({
+          x: actor.x,
+          y: actor.y,
+          sprite: actor.spriteKey || actor.kind,
+          scale: 0.94,
+          bob: 0,
+          alert: false,
+          actor: null,
+        });
         continue;
       }
       if (!actor.alive) {
-        list.push({ x: actor.x, y: actor.y, sprite: "corpse", scale: 0.32, bob: 0, alert: false });
+        list.push({ x: actor.x, y: actor.y, sprite: "corpse", scale: 0.32, bob: 0, alert: false, actor: null });
         continue;
       }
       list.push({
         x: actor.x,
         y: actor.y,
-        sprite: actor.kind,
+        sprite: actor.spriteKey || actor.kind,
         scale: actor.kind === "driver" ? 0.9 : 0.94,
         bob: actor.state === "chase" ? 1 : 0,
         alert: actor.state === "chase",
+        actor: actor.kind === "courtesan" ? null : actor,
+      });
+    }
+
+    for (const animal of world.animals || []) {
+      if (!animal.alive) {
+        list.push({
+          x: animal.x,
+          y: animal.y,
+          sprite: "corpse",
+          scale: 0.28,
+          bob: 0,
+          alert: false,
+          actor: null,
+        });
+        continue;
+      }
+      list.push({
+        x: animal.x,
+        y: animal.y,
+        sprite: animal.spriteKey || animal.kind,
+        scale: animal.scale || 0.8,
+        bob: animal.state === "chase" ? 1 : 0,
+        alert: false,
+        actor: null,
       });
     }
 
@@ -283,12 +374,29 @@ export class Renderer {
       if (transformY <= 0.18) continue;
 
       const screenX = (SCREEN_W / 2) * (1 + transformX / transformY);
+
+      // Размер по глубине (это правильная перспектива). Проблема была не в нём,
+      // а в отсутствии отсечек: при transformY ≈ 0 спрайт раздувался в полосу
+      // на весь экран. Лечим отсечкой по глубине и реальному расстоянию.
+      const trueDist = Math.sqrt(dx * dx + dy * dy);
+      if (trueDist < 0.55 || transformY < 0.5) continue;
+
       const spriteH = Math.abs(SCREEN_H / transformY) * item.scale;
       const spriteW = spriteH * (sprite.width / sprite.height);
       if (spriteH < 2) continue;
 
+      // Спрайт больше пары экранов бесполезен и ломает кадр.
+      if (spriteH > SCREEN_H * 2.2 || spriteW > SCREEN_W * 2.2) continue;
+
+      // Освещение: у спрайтов его не было вообще, они светились ночью.
+      const lightHere = this.lightmap
+        ? sampleLight(this.lightmap, item.x, item.y)
+        : 1;
+      const spriteLight = Math.max(0.28, Math.min(1.15, this.light * lightHere));
+      const ambientAlpha = Math.max(0.35, Math.min(1, spriteLight));
+
       const bob = item.bob ? Math.sin(time * 11 + item.x * 3) * spriteH * 0.018 : 0;
-      const groundY = horizon + SCREEN_H / (2 * transformY) + bob;
+      const groundY = horizon + (SCREEN_H * 0.5 + this.jumpZ) / transformY + bob;
       const top = groundY - spriteH;
       const left = screenX - spriteW / 2;
 
@@ -309,7 +417,13 @@ export class Renderer {
       }
 
       const alpha = Math.max(0.4, Math.min(1, 1.15 - transformY * 0.028));
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = alpha * ambientAlpha;
+
+      // Затемнение спрайта по освещению: без этого всё светится ночью.
+      const canFilter = typeof ctx.filter === "string";
+      if (canFilter) {
+        ctx.filter = `brightness(${spriteLight.toFixed(3)}) saturate(0.9)`;
+      }
 
       let runStart = -1;
       for (let col = startX; col <= endX + 1; col++) {
@@ -334,7 +448,15 @@ export class Renderer {
           runStart = -1;
         }
       }
+      if (canFilter) ctx.filter = "none";
       ctx.globalAlpha = 1;
+
+      if (item.actor && showSuspicion) {
+        const col = Math.floor(screenX);
+        if (col >= 0 && col < SCREEN_W && transformY < this.zBuffer[col]) {
+          this.drawSuspicion(ctx, item.actor, suspicionSource(item.actor), screenX, top, spriteH);
+        }
+      }
 
       if (item.alert && centerCol >= 0 && centerCol < SCREEN_W && transformY < this.zBuffer[centerCol]) {
         ctx.save();
@@ -350,13 +472,47 @@ export class Renderer {
     }
   }
 
+  // Дуга подозрения над стражем: зелёный → жёлтый → красный.
+  drawSuspicion(ctx, actor, suspicion, screenX, top, spriteH) {
+    if (!Number.isFinite(suspicion) || suspicion < 0.04) return;
+    // Слишком далёкий или слишком близкий спрайт не должен давать полосу на весь экран.
+    if (!Number.isFinite(spriteH) || spriteH < 24 || spriteH > 260) return;
+
+    const clamped = Math.min(1, suspicion);
+    const y = top - (spriteH > 60 ? 16 : 10);
+    const width = Math.max(14, Math.min(38, spriteH * 0.38));
+    const height = 3;
+
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    ctx.fillRect(screenX - width / 2 - 1, y - 1, width + 2, height + 2);
+
+    let color = "#6fa84a";
+    if (clamped > 0.65) color = "#d8a03a";
+    if (clamped > 0.85 || actor.state === "chase") color = "#d8402f";
+
+    ctx.fillStyle = color;
+    ctx.fillRect(screenX - width / 2, y, width * clamped, height);
+
+    if (actor.asleep) {
+      ctx.fillStyle = "#8aa2b8";
+      ctx.font = "bold 11px Georgia";
+      ctx.textAlign = "center";
+      ctx.fillText("z", screenX + width / 2 + 5, y + 5);
+    }
+    ctx.restore();
+  }
+
   drawWeapon(player, time) {
     const ctx = this.ctx;
     const swing = player.swingT > 0 ? 1 - player.swingT / 0.34 : 0;
     const bob = Math.sin(player.walkPhase) * 5 + (player.crouching ? 8 : 0);
-    const x = SCREEN_W * 0.76 - swing * 150;
-    const y = SCREEN_H - 22 + bob + swing * 26;
-    const angle = -0.55 + swing * 1.5;
+    // Блок: меч разворачивается поперёк корпуса, гарда ближе к центру экрана.
+    const block = player.blocking ? 1 : 0;
+    const x = SCREEN_W * 0.76 - swing * 150 - block * 190;
+    const y = SCREEN_H - 22 + bob + swing * 26 - block * 46 + (player.jumpZ || 0) * -0.35;
+    const angle = -0.55 + swing * 1.5 - block * 0.85;
 
     ctx.save();
     ctx.translate(x, y);

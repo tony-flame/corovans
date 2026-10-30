@@ -15,35 +15,44 @@
       <div id="vitals">
         <div class="bar"><div id="hp-fill" class="fill hp"></div><span id="hp-text">100 / 100</span></div>
         <div class="bar"><div id="st-fill" class="fill st"></div><span id="st-text">100</span></div>
+        <div class="bar bar-noise"><div id="noise-fill" class="fill noise"></div><span id="noise-text">тихо</span></div>
         <div id="wanted" class="hidden"></div>
+        <div id="bleed" class="hidden"></div>
       </div>
 
       <div id="topright">
         <div id="gold">0 зм.</div>
+        <div id="rep" class="hud-sub">Репутация: 0</div>
+        <div id="phase" class="hud-sub">День</div>
         <div id="objective"></div>
+        <div id="fame" class="hidden"></div>
+        <div id="contract" class="hidden"></div>
       </div>
 
       <div id="crosshair"><span></span></div>
       <div id="prompt"></div>
       <div id="progress" class="hidden"><div id="progress-fill"></div></div>
       <div id="messages"></div>
-      <div id="controls-hint">WASD — идти · Shift — бег · Ctrl — крадучись · E — действие · ЛКМ — удар · I — помощь · Esc — пауза</div>
+      <div id="controls-hint">WASD — идти · Shift — бег · C — крадучись · Space — прыжок · E — действие · F — съесть · ЛКМ — удар · ПКМ — блок · I — помощь · Esc — пауза</div>
     </div>
 
     <div id="start" class="overlay">
       <div class="panel">
         <h1>КОРОВАНЫ</h1>
         <p class="sub">Тёмная дорога · демо</p>
-        <p>Вы — бедный искатель приключений. На северной стоянке стоит караван. Обчистите фургон или перебейте охрану, продайте добычу скупщику и соберите <b>300 золотых</b>.</p>
+        <p>Вы — бедный искатель приключений. На северной стоянке стоит караван. Обчистите фургон или перебейте охрану, продайте добычу скупщику и соберите <b>300 золотых</b>. Дальше — три акта, контракты Мардо и репутация, которая переживёт смерть.</p>
         <ul class="controls">
           <li><kbd>WASD</kbd> — движение</li>
           <li><kbd>Мышь</kbd> — обзор</li>
-          <li><kbd>Shift</kbd> — бег, <kbd>Ctrl</kbd> — крадучись</li>
-          <li><kbd>E</kbd> — взаимодействие / обыск</li>
-          <li><kbd>ЛКМ</kbd> — удар, <kbd>I</kbd> — помощь</li>
+          <li><kbd>Shift</kbd> — бег, <kbd>C</kbd> — крадучись</li>
+          <li><kbd>Space</kbd> — прыжок, <kbd>E</kbd> — взаимодействие / обыск</li>
+          <li><kbd>ЛКМ</kbd> — удар, <kbd>ПКМ</kbd> — блок, <kbd>I</kbd> — помощь</li>
         </ul>
-        <button id="start-btn">Войти в игру</button>
-        <p class="hint">Клик по экрану захватывает мышь. Esc освобождает её.</p>
+        <div class="row">
+          <button id="start-btn">Новый забег</button>
+          <button id="load-btn" class="hidden">Продолжить</button>
+        </div>
+        <p class="hint">Клик по экрану захватывает мышь. Esc освобождает её. Прогресс сохраняется на чекпоинтах.</p>
       </div>
     </div>
 
@@ -60,7 +69,7 @@
         <h2>Скупщик Мардо</h2>
         <p class="muted">«Товар без вопросов, вопросы без товара».</p>
         <div id="trade-gold" class="trade-gold"></div>
-        <div class="trade-grid">
+        <div class="trade-grid three">
           <div>
             <h3>Добыча</h3>
             <div id="trade-loot" class="list"></div>
@@ -68,6 +77,12 @@
           <div>
             <h3>Улучшения</h3>
             <div id="trade-upgrades" class="list"></div>
+          </div>
+          <div>
+            <h3>Доска заказов</h3>
+            <div id="contract-board" class="list"></div>
+            <h3>Репутация</h3>
+            <div id="unlocks" class="list"></div>
           </div>
         </div>
         <div class="row">
@@ -78,17 +93,29 @@
       </div>
     </div>
 
+    <div id="loot" class="overlay hidden">
+      <div class="panel">
+        <h2>Фургон</h2>
+        <p class="muted">Берите столько, сколько унесёте. Остальное пропадёт.</p>
+        <div id="loot-pick" class="list"></div>
+        <div class="row">
+          <button id="loot-done">Уйти</button>
+        </div>
+      </div>
+    </div>
+
     <div id="help" class="overlay hidden">
       <div class="panel">
         <h2>Как играть</h2>
         <ul class="controls">
-          <li><kbd>WASD</kbd> — движение, <kbd>Shift</kbd> — бег, <kbd>Ctrl</kbd> — крадучись</li>
-          <li><kbd>E</kbd> — открыть скупщика или обыскать фургон (удерживайте)</li>
-          <li><kbd>ЛКМ</kbd> — удар мечом</li>
+          <li><kbd>WASD</kbd> — движение, <kbd>Shift</kbd> — бег, <kbd>C</kbd> — крадучись</li>
+          <li><kbd>Space</kbd> — прыжок, <kbd>E</kbd> — открыть скупщика или обыскать фургон (удерживайте)</li>
+          <li><kbd>ЛКМ</kbd> — удар мечом, <kbd>ПКМ</kbd> — блок</li>
           <li><kbd>I</kbd> — закрыть помощь, <kbd>Esc</kbd> — пауза</li>
         </ul>
-        <p>Стража замечает вас быстрее, если вы бежите и находитесь близко. Крадучись, можно подобраться к фургону и вынести груз без боя.</p>
-        <p>После ограбления вернитесь к Мардо в деревне и продайте добычу. Штраф за розыск можно оплатить там же.</p>
+        <p>Стража замечает вас быстрее, если вы бежите и находитесь близко. Крадучись, можно подобраться к фургону и вынести груз без боя. Полоска над головой стража показывает, насколько он вас подозревает.</p>
+        <p>Прыжок поднимает камеру, но приземление слышно — не топочите у спящей стражи. Блок держит удар только спереди и тратит выносливость: пустая полоска означает пробитую защиту.</p>
+        <p>Мардо даёт заказы: без крови, не на глаза, до рассвета. За них платят золотом и репутацией, а репутация открывает постоянные улучшения. Смерть отнимает часть золота и всю добычу, но не репутацию.</p>
         <button id="close-help">Понятно</button>
       </div>
     </div>

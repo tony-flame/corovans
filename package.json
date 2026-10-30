@@ -3,9 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Корованы: Тёмная дорога — демо-игра в духе Daggerfall",
+  "description": "Корованы: Тёмная дорога — сырой прототип (бета) браузерной игры в духе Daggerfall",
+  "keywords": [
+    "game",
+    "raycaster",
+    "canvas",
+    "daggerfall",
+    "vanilla-js",
+    "prototype",
+    "beta"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "start": "python -m http.server 8000",
+    "start": "node scripts/serve.mjs",
+    "start:python": "python -m http.server 8000",
     "check": "node scripts/check.mjs",
     "test": "node --test",
     "verify": "npm run check && npm test"

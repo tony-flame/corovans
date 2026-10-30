@@ -1,4 +1,7 @@
-// Карта, коллизии, актёры и стоянка каравана.
+// Карта 120×120, коллизии, актёры и стоянка каравана.
+// Мир строится зонами: деревня, тракт, поворот, стойбище, поля, лес, руины.
+// Координаты — код, не данные.
+
 export const TILE = {
   GRASS: 0,
   BRICK: 1,
@@ -6,142 +9,288 @@ export const TILE = {
   STONE: 3,
   ROAD: 4,
   DIRT: 5,
+  // Фахверк: кирпич или штукатурка с тёмным каркасом.
+  BRICK_FRAME: 6,
+  PLASTER_FRAME: 7,
 };
 
-export const MAP_W = 40;
-export const MAP_H = 40;
+export const MAP_W = 120;
+export const MAP_H = 120;
+
+// ── Зоны мира ───────────────────────────────────────────────────────
+export const ZONES = {
+  VILLAGE: { x0: 6, y0: 68, x1: 44, y1: 104 },
+  SQUARE: { x0: 14, y0: 84, x1: 30, y1: 92 },
+  ROAD_EAST: { y0: 86, y1: 87, x0: 4, x1: 104 },
+  TURN_NORTH: { x0: 98, y0: 26, x1: 99, y1: 86 },
+  CAMP: { x0: 92, y0: 18, x1: 110, y1: 40 },
+  FIELDS: { x0: 46, y0: 70, x1: 90, y1: 100 },
+  RUINS: { x0: 60, y0: 40, x1: 70, y1: 50 },
+  FOREST: { x0: 30, y0: 20, x1: 60, y1: 60 },
+};
+
+export const SPAWN = { x: 12.5, y: 92.5 };
+export const MERCHANT_POS = { x: 20.5, y: 90.5 };
+export const COURTESAN_POS = { x: 26.5, y: 79.5 };
+export const WAGON_BASE = { x: 102.4, y: 28.1 };
 
 let nextActorId = 1;
 
-function isWallTile(t) {
-  return t === TILE.BRICK || t === TILE.WOOD || t === TILE.STONE;
+// Единственное определение «это стена». ray.js импортирует его отсюда:
+// раньше функция была продублирована, и новый тайл сделал бы стену
+// проходимой насквозь, но по-прежнему видимой.
+export function isWallTile(t) {
+  return (
+    t === TILE.BRICK ||
+    t === TILE.WOOD ||
+    t === TILE.STONE ||
+    t === TILE.BRICK_FRAME ||
+    t === TILE.PLASTER_FRAME
+  );
 }
+
+// Раскладки стоянки по архетипам (смещения от WAGON_BASE внутри зоны лагеря).
+export const CAMP_LAYOUTS = {
+  road_camp: {
+    label: "Дорожный лагерь",
+    wagon: [0, 0],
+    driver: [0.1, -1.8],
+    guardSpots: [
+      [-2.1, 2.1],
+      [2.4, 1.5],
+      [-2.3, -0.5],
+      [2.9, 3.3],
+      [-2.9, 3.3],
+    ],
+    extra: [],
+  },
+  night_camp: {
+    label: "Ночёвка",
+    wagon: [0, 0],
+    driver: [0.9, -1.5],
+    guardSpots: [
+      [-1.2, 1.3],
+      [1.3, 2.3],
+      [-1.3, -1.2],
+      [1.9, -0.1],
+      [-2.7, 0.3],
+    ],
+    extra: [[-2.7, -1.1, { asleep: true }]],
+  },
+  fortified_post: {
+    label: "Укреплённый пост",
+    wagon: [0, 0],
+    driver: [0.1, -1.8],
+    guardSpots: [
+      [-2.7, 2.9],
+      [2.7, 2.5],
+      [-2.5, -1.2],
+      [3.1, -0.7],
+      [0.2, 3.9],
+    ],
+    extra: [],
+  },
+  double_wagon: {
+    label: "Двойной фургон",
+    wagon: [0, 0],
+    driver: [0.1, -1.8],
+    secondWagon: [2.6, -2.9],
+    guardSpots: [
+      [-2.1, 2.1],
+      [2.4, 1.5],
+      [-2.3, -0.5],
+      [2.9, 3.3],
+      [-2.9, 3.3],
+    ],
+    extra: [],
+  },
+};
+
+const CAMP_ORIGIN = { x: WAGON_BASE.x, y: WAGON_BASE.y };
 
 export function createWorld() {
   const map = new Uint8Array(MAP_W * MAP_H).fill(TILE.GRASS);
 
   const setTile = (x, y, t) => {
-    if (x >= 0 && y >= 0 && x < MAP_W && y < MAP_H) map[y * MAP_W + x] = t;
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+    if (cx >= 0 && cy >= 0 && cx < MAP_W && cy < MAP_H) map[cy * MAP_W + cx] = t;
+  };
+  const getTile = (x, y) => {
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+    if (cx < 0 || cy < 0 || cx >= MAP_W || cy >= MAP_H) return TILE.STONE;
+    return map[cy * MAP_W + cx];
   };
   const fillRect = (x0, y0, x1, y1, t) => {
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) setTile(x, y, t);
     }
   };
+  // Открытая коробка: стены по периметру и проём с одной стороны.
+  const hollowRect = (x0, y0, x1, y1, t, gate) => {
+    fillRect(x0, y0, x1, y1, t);
+    fillRect(x0 + 1, y0 + 1, x1 - 1, y1 - 1, TILE.DIRT);
+    if (gate === "south") fillRect(Math.floor((x0 + x1) / 2), y1, Math.floor((x0 + x1) / 2), y1, TILE.DIRT);
+    else if (gate === "north") fillRect(Math.floor((x0 + x1) / 2), y0, Math.floor((x0 + x1) / 2), y0, TILE.DIRT);
+    else if (gate === "west") fillRect(x0, Math.floor((y0 + y1) / 2), x0, Math.floor((y0 + y1) / 2), TILE.DIRT);
+    else if (gate === "east") fillRect(x1, Math.floor((y0 + y1) / 2), x1, Math.floor((y0 + y1) / 2), TILE.DIRT);
+  };
 
-  // граница мира
+  // ── Границы мира ──
   fillRect(0, 0, MAP_W - 1, 0, TILE.STONE);
   fillRect(0, MAP_H - 1, MAP_W - 1, MAP_H - 1, TILE.STONE);
   fillRect(0, 0, 0, MAP_H - 1, TILE.STONE);
   fillRect(MAP_W - 1, 0, MAP_W - 1, MAP_H - 1, TILE.STONE);
 
-  // стоянка каравана и деревенская площадь
-  fillRect(25, 3, 36, 13, TILE.DIRT);
-  fillRect(8, 22, 16, 25, TILE.DIRT);
+  // ── Тракт на восток и поворот на север ──
+  fillRect(ZONES.ROAD_EAST.x0, ZONES.ROAD_EAST.y0, ZONES.ROAD_EAST.x1, ZONES.ROAD_EAST.y1, TILE.ROAD);
+  fillRect(ZONES.TURN_NORTH.x0, ZONES.TURN_NORTH.y0, ZONES.TURN_NORTH.x1, ZONES.TURN_NORTH.y1, TILE.ROAD);
 
-  // дороги: деревня -> восток -> север к стоянке
-  fillRect(3, 23, 33, 24, TILE.ROAD);
-  fillRect(29, 4, 30, 22, TILE.ROAD);
+  // ── Деревня: улицы, площадь ──
+  fillRect(8, 96, 40, 97, TILE.ROAD); // нижняя улица
+  fillRect(8, 80, 40, 81, TILE.ROAD); // верхняя улица
+  fillRect(18, 82, 19, 95, TILE.ROAD); // переулок
+  fillRect(ZONES.SQUARE.x0, ZONES.SQUARE.y0, ZONES.SQUARE.x1, ZONES.SQUARE.y1, TILE.DIRT);
 
-  // дома деревни
-  fillRect(4, 18, 8, 21, TILE.BRICK);
-  fillRect(10, 18, 13, 21, TILE.WOOD);
-  fillRect(4, 26, 7, 29, TILE.STONE);
-  fillRect(11, 26, 14, 29, TILE.WOOD);
+  // Ряд A — север деревни. Фахверк: кирпич и штукатурка с тёмным каркасом.
+  fillRect(9, 70, 13, 74, TILE.WOOD);
+  fillRect(16, 70, 20, 74, TILE.BRICK_FRAME);
+  fillRect(24, 70, 28, 74, TILE.PLASTER_FRAME);
+  fillRect(32, 70, 36, 74, TILE.BRICK_FRAME);
 
-  // руины у дороги — укрытия
-  fillRect(19, 19, 20, 20, TILE.STONE);
-  fillRect(23, 16, 24, 17, TILE.STONE);
-  fillRect(35, 20, 35, 21, TILE.STONE);
+  // Ряд B — между верхней улицей и площадью
+  fillRect(9, 83, 13, 86, TILE.PLASTER_FRAME);
+  fillRect(23, 83, 27, 86, TILE.BRICK_FRAME);
+
+  // Ряд C — юг деревни
+  fillRect(8, 99, 12, 103, TILE.STONE);
+  fillRect(15, 99, 19, 103, TILE.WOOD);
+  fillRect(24, 99, 28, 103, TILE.BRICK);
+  fillRect(31, 99, 35, 103, TILE.STONE);
+
+  // Дворы: сараи (входимые) и заборы
+  hollowRect(31, 84, 35, 88, TILE.WOOD, "south");
+
+  // ── Придорожные постройки за городом ──
+  fillRect(50, 74, 54, 78, TILE.PLASTER_FRAME); // придорожный дом
+  fillRect(58, 74, 62, 78, TILE.BRICK_FRAME); // корчма
+  hollowRect(52, 92, 56, 96, TILE.WOOD, "north"); // сарай у дороги
+
+  // ── Руины: входимые ──
+  hollowRect(ZONES.RUINS.x0, ZONES.RUINS.y0, ZONES.RUINS.x0 + 6, ZONES.RUINS.y0 + 6, TILE.STONE, "east");
+  hollowRect(76, 44, 81, 49, TILE.STONE, "south");
+
+  // ── Стойбище ──
+  fillRect(ZONES.CAMP.x0, ZONES.CAMP.y0, ZONES.CAMP.x1, ZONES.CAMP.y1, TILE.DIRT);
+
+  // ── Лес: плотные деревья, оставляем тропы ──
+  const forestRows = [];
+  for (let y = ZONES.FOREST.y0; y <= ZONES.FOREST.y1; y += 6) {
+    for (let x = ZONES.FOREST.x0; x <= ZONES.FOREST.x1; x += 8) {
+      forestRows.push([x, y]);
+    }
+  }
+  for (const [x, y] of forestRows) fillRect(x, y, x + 2, y + 2, TILE.GRASS);
 
   const props = [];
   const addProp = (sprite, x, y, r, scale, solid = true, blocksSight = false) => {
     props.push({ sprite, x, y, r, scale, solid, blocksSight });
   };
 
-  // стоянка
-  addProp("wagon", 30.3, 8.1, 1.15, 0.95, true, true);
-  addProp("horse", 33.1, 6.9, 0.55, 0.85, true, true);
-  addProp("campfire", 27.2, 6.8, 0.32, 0.5, true, false);
-  addProp("crate", 28.9, 6.4, 0.36, 0.6, true, false);
-  addProp("crate", 33.6, 10.9, 0.36, 0.6, true, false);
-  addProp("barrel", 27.3, 9.9, 0.32, 0.55, true, false);
-  addProp("barrel", 33.8, 6.1, 0.32, 0.55, true, false);
-  addProp("sign", 27.4, 22.1, 0.22, 0.8, true, false);
+  // ── Пропы: стоянка ──
+  addProp("wagon", WAGON_BASE.x, WAGON_BASE.y, 1.15, 0.95, true, true);
+  addProp("horse", WAGON_BASE.x + 2.8, WAGON_BASE.y - 1.2, 0.55, 0.85, true, true);
+  addProp("campfire", WAGON_BASE.x - 3.1, WAGON_BASE.y - 1.3, 0.32, 0.5, true, false);
+  addProp("crate", WAGON_BASE.x - 1.4, WAGON_BASE.y - 1.7, 0.36, 0.6, true, false);
+  addProp("crate", WAGON_BASE.x + 3.3, WAGON_BASE.y + 2.8, 0.36, 0.6, true, false);
+  addProp("barrel", WAGON_BASE.x - 3.0, WAGON_BASE.y + 1.8, 0.32, 0.55, true, false);
+  addProp("barrel", WAGON_BASE.x + 3.5, WAGON_BASE.y - 2.0, 0.32, 0.55, true, false);
 
-  // деревья и кусты
+  // ── Пропы: деревня ──
+  addProp("well", 22.2, 88.4, 0.5, 0.9, true, true);
+  addProp("sign", 26.0, 97.6, 0.22, 0.8, true, false);
+  addProp("basket", 24.4, 89.6, 0.2, 0.4, true, false);
+  addProp("basket", 27.2, 90.8, 0.2, 0.4, true, false);
+  addProp("haystack", 37.5, 86.5, 0.55, 0.9, true, true);
+  addProp("haystack", 38.5, 101.5, 0.55, 0.9, true, true);
+
+  // Заборы по краю деревни
+  for (let x = 6; x <= 42; x += 2) {
+    addProp("fence", x, 106.5, 0.3, 0.7, true, false);
+    addProp("fence", x, 67.4, 0.3, 0.7, true, false);
+  }
+
+  // ── Пропы: дорога ──
+  addProp("milestone", 44.5, 85.2, 0.2, 0.6, true, false);
+  addProp("milestone", 78.5, 85.2, 0.2, 0.6, true, false);
+  addProp("windmill", 96.5, 60.5, 1.2, 1.6, true, true);
+
+  // ── Деревья ──
   const trees = [
-    [16, 27], [20, 27], [24, 27], [34.5, 22.4], [35.2, 25.6], [34, 18],
-    [27, 15], [24, 12], [21, 8], [18, 5], [24, 3.6], [36, 4.5],
-    [12, 16], [9, 14], [5, 33], [14, 34], [22, 34], [30, 34], [35, 31],
-    [37, 14], [6, 15], [15, 10], [4, 8], [20, 16], [26, 26.6],
-    [17, 12], [11, 8], [32, 17], [38, 8], [2.5, 18], [2.5, 29],
+    // вокруг деревни
+    [6.5, 78], [42.5, 76], [5.5, 100], [43.5, 99],
+    [46, 70], [64, 70], [70, 78], [88, 72],
+    // дорога
+    [48, 82], [56, 84], [68, 84], [72, 90], [84, 84], [90, 90],
+    // лес
+    [32, 22], [40, 28], [48, 34], [36, 44], [44, 52], [52, 24],
+    [30, 36], [54, 44], [58, 32], [46, 20], [34, 56], [56, 56],
+    // восток
+    [104, 60], [108, 46], [100, 44], [112, 32], [106, 22],
+    [86, 60], [92, 64], [80, 64],
   ];
   for (const [x, y] of trees) addProp("tree", x, y, 0.36, 1.5, true, true);
 
   const bushes = [
-    [17.2, 25.6], [22.8, 25.7], [12.5, 21.7], [7.2, 23.4], [18.6, 22.5],
-    [31.8, 12.6], [25.4, 12.7], [36.4, 11.8], [15.6, 30.8], [9.5, 31.5],
+    [16, 88], [30, 86], [12, 78], [40, 82], [21, 72],
+    [62, 82], [74, 86], [88, 78], [56, 68], [72, 68],
+    [38, 30], [50, 40], [42, 50], [60, 52], [34, 48],
+    [96, 70], [104, 52], [100, 36], [110, 40],
   ];
   for (const [x, y] of bushes) addProp("bush", x, y, 0.32, 0.7, true, true);
 
   const rocks = [
-    [27, 12.5], [34.2, 12.2], [26.2, 4.6], [36.2, 9], [17, 29],
-    [23, 22.2], [13.5, 23.2], [38, 20],
+    [14, 104], [36, 104], [44, 92], [66, 66], [90, 80],
+    [62, 46], [78, 48], [68, 42], [74, 52],
+    [102, 50], [110, 28], [96, 34], [104, 18],
+    [26, 64], [50, 62],
   ];
   for (const [x, y] of rocks) addProp("rock", x, y, 0.48, 0.65, true, true);
 
   const actors = [];
 
-  const addActor = (kind, x, y, options = {}) => {
-    const actor = {
-      id: nextActorId++,
-      kind,
-      x,
-      y,
-      r: 0.32,
-      hp: 40,
-      maxHp: 40,
-      damage: 7,
-      speed: 2,
-      viewRange: 8,
-      state: "idle",
-      suspicion: 0,
-      attackCd: 0,
-      angle: 0,
-      patrol: [],
-      patrolIndex: 0,
-      homeX: x,
-      homeY: y,
-      alive: true,
-      alertTimer: 0,
-      lostTimer: 0,
-      ...options,
-    };
-    actors.push(actor);
-    return actor;
-  };
-
-  const merchant = addActor("merchant", 9.6, 22.35, {
+  const merchant = makeActor("merchant", MERCHANT_POS.x, MERCHANT_POS.y, {
     hp: 9999,
     maxHp: 9999,
     speed: 0,
     viewRange: 0,
   });
+  actors.push(merchant);
 
-  const villageGuard = addActor("village_guard", 16.6, 24.4, {
+  const villageGuard = makeActor("village_guard", 22.5, 94.5, {
     hp: 70,
     maxHp: 70,
     damage: 10,
     speed: 2.2,
     viewRange: 9,
     patrol: [
-      { x: 16.6, y: 24.4 },
-      { x: 20.4, y: 24.4 },
-      { x: 20.4, y: 23.4 },
-      { x: 16.6, y: 23.4 },
+      { x: 22.5, y: 94.5 },
+      { x: 30.5, y: 94.5 },
+      { x: 30.5, y: 88.5 },
+      { x: 22.5, y: 88.5 },
     ],
   });
+  actors.push(villageGuard);
+
+  const courtesan = makeActor("courtesan", COURTESAN_POS.x, COURTESAN_POS.y, {
+    hp: 9999,
+    maxHp: 9999,
+    speed: 0,
+    viewRange: 0,
+    spriteKey: "courtesan",
+  });
+  actors.push(courtesan);
 
   const world = {
     map,
@@ -149,91 +298,168 @@ export function createWorld() {
     actors,
     merchant,
     villageGuard,
-    spawn: { x: 7.5, y: 24.5 },
-    wagon: { x: 30.3, y: 8.1 },
+    courtesan,
+    spawn: { ...SPAWN },
+    wagon: { ...WAGON_BASE },
     tier: 1,
     wagonLooted: false,
     campGuards: [],
+    animals: [],
+    archetype: "road_camp",
+    layout: CAMP_LAYOUTS.road_camp,
+    dormantGuards: [],
+    secondWagon: null,
   };
 
   spawnCamp(world, 1);
   return world;
 }
 
-export function spawnCamp(world, tier) {
+// Единая фабрика актёров.
+export function makeActor(kind, x, y, options = {}) {
+  return {
+    id: nextActorId++,
+    kind,
+    spriteKey: kind,
+    x,
+    y,
+    r: kind === "driver" ? 0.3 : 0.32,
+    hp: 40,
+    maxHp: 40,
+    damage: 7,
+    speed: 2,
+    viewRange: 8,
+    state: "idle",
+    suspicion: 0,
+    attackCd: 0,
+    angle: 0,
+    patrol: [],
+    patrolIndex: 0,
+    homeX: x,
+    homeY: y,
+    alive: true,
+    alertTimer: 0,
+    lostTimer: 0,
+    lastSeenX: null,
+    lastSeenY: null,
+    asleep: false,
+    ...options,
+  };
+}
+
+function guardPatrol(x, y) {
+  return [
+    { x, y },
+    { x: x + 1.4, y: y + 1.2 },
+    { x: x + 0.6, y: y + 2.2 },
+    { x: x - 0.8, y: y + 1.0 },
+  ];
+}
+
+function campPoint(offset) {
+  return [CAMP_ORIGIN.x + offset[0], CAMP_ORIGIN.y + offset[1]];
+}
+
+// tuning приходит из style.js (tuningFor).
+export function spawnCamp(world, tier, tuning = null) {
+  const archetype = (tuning && tuning.archetype) || "road_camp";
+  const layout = CAMP_LAYOUTS[archetype] || CAMP_LAYOUTS.road_camp;
+  const mods = tuning || {};
+
   world.actors = world.actors.filter((a) => a.kind !== "guard" && a.kind !== "driver");
   world.tier = tier;
   world.wagonLooted = false;
+  world.archetype = archetype;
+  world.layout = layout;
 
-  const guardSpots = [
-    [28.2, 10.2],
-    [32.7, 9.6],
-    [28.0, 7.6],
-    [33.2, 11.4],
-    [27.4, 11.4],
-  ];
-  const guardCount = Math.min(1 + tier, guardSpots.length);
+  const [wx, wy] = campPoint(layout.wagon);
+  world.wagon = { x: wx, y: wy };
+
+  const hpScale = mods.hp || 1;
+  const damageScale = mods.damage || 1;
+  const viewScale = mods.viewRange || 1;
+  const baseCount = tier + 1;
+  const guardCount = Math.min(
+    Math.max(1, baseCount + (mods.guardCountDelta || 0)),
+    layout.guardSpots.length
+  );
+
   world.campGuards = [];
+  world.dormantGuards = [];
 
   for (let i = 0; i < guardCount; i++) {
-    const [x, y] = guardSpots[i];
-    const guard = {
-      id: nextActorId++,
-      kind: "guard",
-      x,
-      y,
-      r: 0.32,
-      hp: 38 + tier * 14,
-      maxHp: 38 + tier * 14,
-      damage: 7 + tier * 2,
+    const [x, y] = campPoint(layout.guardSpots[i]);
+    const hp = Math.round((38 + tier * 14) * hpScale);
+    const guard = makeActor("guard", x, y, {
+      hp,
+      maxHp: hp,
+      damage: Math.max(4, Math.round((7 + tier * 2) * damageScale)),
       speed: 2.0 + tier * 0.08,
-      viewRange: 8 + tier * 0.4,
-      state: "idle",
-      suspicion: 0,
-      attackCd: 0,
+      viewRange: (8 + tier * 0.4) * viewScale,
       angle: Math.PI / 2,
-      patrol: [
-        { x, y },
-        { x: x + 1.4, y: y + 1.2 },
-        { x: x + 0.6, y: y + 2.2 },
-        { x: x - 0.8, y: y + 1.0 },
-      ],
+      patrol: guardPatrol(x, y),
       patrolIndex: 1,
-      homeX: x,
-      homeY: y,
-      alive: true,
-      alertTimer: 0,
-      lostTimer: 0,
-    };
+    });
     world.actors.push(guard);
     world.campGuards.push(guard);
   }
 
-  const driver = {
-    id: nextActorId++,
-    kind: "driver",
-    x: 30.4,
-    y: 6.3,
-    r: 0.3,
-    hp: 22 + tier * 6,
-    maxHp: 22 + tier * 6,
+  for (const [ox, oy, opts] of layout.extra || []) {
+    const [x, y] = campPoint([ox, oy]);
+    const hp = Math.round((30 + tier * 10) * hpScale);
+    const sleeper = makeActor("guard", x, y, {
+      hp,
+      maxHp: hp,
+      damage: Math.max(4, Math.round((6 + tier * 2) * damageScale)),
+      speed: 2.0 + tier * 0.08,
+      viewRange: (7 + tier * 0.4) * viewScale,
+      angle: Math.PI / 2,
+      patrol: [{ x, y }],
+      asleep: true,
+      ...(opts || {}),
+    });
+    world.actors.push(sleeper);
+    world.campGuards.push(sleeper);
+    world.dormantGuards.push(sleeper);
+  }
+
+  const [dx, dy] = campPoint(layout.driver);
+  const driverHp = Math.round((22 + tier * 6) * hpScale);
+  const driver = makeActor("driver", dx, dy, {
+    hp: driverHp,
+    maxHp: driverHp,
     damage: 3,
     speed: 2.6,
-    viewRange: 7,
-    state: "idle",
-    suspicion: 0,
-    attackCd: 0,
+    viewRange: 7 * viewScale,
     angle: Math.PI / 2,
-    patrol: [{ x: 30.4, y: 6.3 }],
-    patrolIndex: 0,
-    homeX: 30.4,
-    homeY: 6.3,
-    alive: true,
-    alertTimer: 0,
-    lostTimer: 0,
-  };
+    patrol: [{ x: dx, y: dy }],
+    homeX: dx,
+    homeY: dy,
+  });
   world.actors.push(driver);
   world.campGuards.push(driver);
+
+  world.secondWagon = null;
+  if (layout.secondWagon) {
+    const [sx, sy] = campPoint(layout.secondWagon);
+    world.secondWagon = { x: sx, y: sy, looted: false };
+  }
+
+  return world;
+}
+
+// Добор спящих стражей, если игрок нашумел рядом.
+export function wakeSleepers(world, x, y, radius = 7) {
+  let woken = 0;
+  for (const guard of world.dormantGuards || []) {
+    if (!guard.alive || !guard.asleep) continue;
+    if (Math.hypot(guard.x - x, guard.y - y) > radius) continue;
+    guard.asleep = false;
+    guard.suspicion = Math.max(guard.suspicion, 0.9);
+    guard.state = "return";
+    woken++;
+  }
+  return woken;
 }
 
 export function isSolid(world, x, y) {
@@ -274,6 +500,13 @@ export function canStand(world, x, y, r, ignore = null) {
     const dx = x - actor.x;
     const dy = y - actor.y;
     if (dx * dx + dy * dy < (r + actor.r) * (r + actor.r)) return false;
+  }
+
+  for (const animal of world.animals || []) {
+    if (!animal.alive) continue;
+    const dx = x - animal.x;
+    const dy = y - animal.y;
+    if (dx * dx + dy * dy < (r + animal.r) * (r + animal.r)) return false;
   }
   return true;
 }
@@ -322,6 +555,17 @@ export function nearestInteraction(world, player) {
     });
   }
 
+  if (world.secondWagon && !world.secondWagon.looted) {
+    candidates.push({
+      type: "wagon",
+      x: world.secondWagon.x,
+      y: world.secondWagon.y,
+      radius: 2.3,
+      label: "Удерживайте E — обыскать второй фургон",
+      second: true,
+    });
+  }
+
   const merchant = world.merchant;
   candidates.push({
     type: "merchant",
@@ -331,10 +575,72 @@ export function nearestInteraction(world, player) {
     label: "E — поговорить со скупщиком",
   });
 
+  if (world.courtesan) {
+    const c = world.courtesan;
+    candidates.push({
+      type: "courtesan",
+      x: c.x,
+      y: c.y,
+      radius: 2.2,
+      label: `E — подойти к ${c.displayName || "куртизанке"}`,
+    });
+  }
+
   let best = null;
   for (const c of candidates) {
     const dist = Math.hypot(player.x - c.x, player.y - c.y);
     if (dist <= c.radius && (!best || dist < best.dist)) best = { ...c, dist };
   }
   return best;
+}
+
+// ── Проверки карты (используются тестами) ───────────────────────────
+
+// Проходимость по тайлам и препятствиям: есть ли путь от точки до точки.
+export function hasPath(world, from, to, radius = 0.3) {
+  if (!canStand(world, from.x, from.y, radius)) {
+    // Старт может быть занят актёром — проверяем только стены.
+    if (isSolid(world, from.x, from.y)) return false;
+  }
+
+  const startX = Math.floor(from.x);
+  const startY = Math.floor(from.y);
+  const goalX = Math.floor(to.x);
+  const goalY = Math.floor(to.y);
+
+  if (isSolid(world, goalX + 0.5, goalY + 0.5)) return false;
+
+  const seen = new Uint8Array(MAP_W * MAP_H);
+  const queue = [[startX, startY]];
+  seen[startY * MAP_W + startX] = 1;
+
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+
+  while (queue.length) {
+    const [cx, cy] = queue.shift();
+    if (cx === goalX && cy === goalY) return true;
+
+    for (const [dx, dy] of dirs) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+      const index = ny * MAP_W + nx;
+      if (seen[index]) continue;
+      if (isWallTile(map_safe(world, nx, ny))) continue;
+      seen[index] = 1;
+      queue.push([nx, ny]);
+    }
+  }
+
+  return false;
+}
+
+function map_safe(world, x, y) {
+  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return TILE.STONE;
+  return world.map[y * MAP_W + x];
 }

@@ -70,6 +70,65 @@ export class AudioSys {
     this.tone(95, 0.18, "square", 0.1, 45);
   }
 
+  // Шум дождя: ровный слой, плавно включается.
+  rain(on, intensity = 0.5) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    if (!this.rainNode) {
+      const length = this.ctx.sampleRate * 2;
+      const buffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+
+      const src = this.ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "highpass";
+      filter.frequency.value = 900;
+
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      src.start();
+
+      this.rainNode = { src, gain };
+    }
+
+    const target = on ? 0.05 + intensity * 0.09 : 0;
+    this.rainNode.gain.gain.cancelScheduledValues(now);
+    this.rainNode.gain.gain.linearRampToValueAtTime(target, now + 1.2);
+  }
+
+  // Металлический лязг блока: короткий звон + шум удара по стали.
+  block() {
+    this.tone(1180, 0.09, "triangle", 0.1, 900);
+    this.tone(760, 0.14, "square", 0.06, 620);
+    this.noise(0.08, 0.12, 3200, 2.4);
+  }
+
+  // Чавканье: короткий низкий шум.
+  eat() {
+    this.noise(0.12, 0.09, 480, 0.7);
+    this.tone(120, 0.1, "triangle", 0.05, 90);
+  }
+
+  // Крик зверя: разный тон по виду.
+  beast(kind) {
+    if (kind === "fox") {
+      this.tone(720, 0.12, "sawtooth", 0.07, 480);
+    } else if (kind === "goat") {
+      this.tone(520, 0.16, "triangle", 0.08, 380);
+    } else {
+      this.tone(180, 0.35, "sawtooth", 0.09, 120);
+    }
+  }
+
   hurt() {
     this.tone(140, 0.3, "sawtooth", 0.12, 60);
     this.noise(0.15, 0.1, 300, 0.7);

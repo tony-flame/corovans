@@ -32,6 +32,14 @@ export function sellAll(inv, multiplier = 1) {
   return value;
 }
 
+export function weightLeft(inv) {
+  return Math.max(0, inv.capacity - totalWeight(inv));
+}
+
+export function canCarry(inv, item) {
+  return Boolean(item) && totalWeight(inv) + item.weight <= inv.capacity + 1e-9;
+}
+
 export const LOOT_TABLE = [
   { id: "silk", name: "Тюк шёлка", value: 34, weight: 1.5, kind: "goods" },
   { id: "wine", name: "Бочонок вина", value: 26, weight: 3, kind: "goods" },
@@ -45,7 +53,7 @@ export const LOOT_TABLE = [
 export function rollLoot(tier, rng = Math.random, count = 2) {
   const picked = [];
   for (let i = 0; i < count; i++) {
-    const base = LOOT_TABLE[Math.floor(rng() * LOOT_TABLE.length)];
+    const base = LOOT_TABLE[Math.floor(rng() * LOOT_TABLE.length) % LOOT_TABLE.length];
     const scale = 1 + (tier - 1) * 0.25;
     picked.push({
       ...base,

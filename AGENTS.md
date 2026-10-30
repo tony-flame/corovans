@@ -2,35 +2,74 @@
 
 ## Project
 
-Browser demo "Корованы: Тёмная дорога" — a Daggerfall-like first-person raycaster where you rob caravans. Vanilla JS ES modules + Canvas 2D, no build step and no npm dependencies. All art/audio is procedural.
+Browser demo "Корованы: Тёмная дорога" — a Daggerfall-like first-person raycaster where you rob caravans. Vanilla JS ES modules + Canvas 2D, no build step, no npm dependencies (`npm install` is never needed), no bundler/linter/typecheck/CI. All art and audio are procedural.
+
+User-facing text, comments and `README.md` are Russian. Keep new strings in Russian.
 
 ## Commands
 
-- `npm start` — static server on port 8000 (runs `python -m http.server 8000`). Open `http://localhost:8000`.
-- `npm run verify` — syntax-check every module and run unit tests. Run before committing.
-- `npm test` — unit tests only; `node --test tests/logic.test.js` for one file.
-- `?debug=1` on the game URL exposes `window.__corovans` (`game`, `world`, `player`, `ui`, `input`, `renderer`) for CDP/manual debugging.
+- `npm start` — dev server on port 8000 via `scripts/serve.mjs`, which sends `Cache-Control: no-store`. Open `http://localhost:8000`.
+- `npm run start:python` — legacy `python -m http.server 8000`. **It sends no cache headers**, so Chrome keeps stale ES modules (`304 Not Modified`) and you debug code that isn't running. Prefer `npm start`.
+- `npm run verify` — `npm run check && npm test`; the only real gate, run it before committing.
+- `npm run check` — `node --check` on every `.js`/`.mjs` in `src/`, `tests/`, `scripts/` (hardcoded dir list in `scripts/check.mjs`; new dirs must be added there).
+- `npm test` — `node --test` (auto-discovers `tests/*.test.js`). One file: `node --test tests/systems.test.js`.
+- `?debug=1` (any value works) exposes `window.__corovans`: `game`, `run`, `profile`, `ui`, `input`, `player`, `world`, `renderer`, `saveCheckpoint`, `debugStyle`.
 
-ES modules require HTTP; opening `index.html` via `file://` fails. There is no bundler, transpiler, or browser test runner.
+ES modules require HTTP; `index.html` over `file://` fails. There is no browser test runner, so rendering/UI/input changes can only be validated by playing the page.
+
+`main.js` logs `[corovans] build <stamp>` and exposes `window.__corovans.build` under `?debug=1`. If the stamp is not the one you just wrote, the browser is serving a cached module — reload hard before debugging behavior.
 
 ## Architecture
 
-- `src/main.js` — all game wiring: state, loop, interactions, trade, wanted, caravan respawn, overlays. Start here when changing behavior.
-- `src/world.js` — 40×40 tile map built in code, props/actors, collision, line of sight, interaction radii, camp spawns. Map coordinates are code, not data files.
-- `src/raycaster.js` — DDA walls, floor casting, billboard sprites, weapon overlay. Fixed internal 640×360 buffer scaled by CSS.
-- `src/enemies.js` — guard/driver AI. Requires `game.damagePlayer` and `game.onGuardAlert`, assigned in `main.js`; don't call AI before that wiring.
-- `src/player.js` — movement, stamina, crouch/sprint, bob.
-- `src/inventory.js`, `src/economy.js`, `src/combat.js` — pure logic, covered by `node:test`.
-- `src/ui.js`, `src/audio.js`, `src/textures.js`, `src/sprites.js` — browser/DOM-dependent; don't import them in Node tests.
+- `src/main.js` — only entrypoint. Owns the mutable `game` runtime object, the rAF loop, interactions, trade, contracts wiring, checkpoints. `run` is the persisted run state; `game` is throwaway runtime state. Don't mix them.
+- `src/run.js` — run creation, snapshot/restore, `canCheckpoint`, acts, soft-death penalty. All save logic is testable here; `src/save.js` is the only module touching `localStorage`.
+- `src/world.js` — 120×120 tile map built in code, props, actors, collision, LOS, archetype layouts (`CAMP_LAYOUTS`), map zones (`ZONES`, `SPAWN`, `MERCHANT_POS`, `COURTESAN_POS`, `WAGON_BASE`). `makeActor()` is the single actor factory; `spawnCamp(world, tier, tuning)` rebuilds the camp. Map coordinates are code, not data. `hasPath()` does a tile flood-fill — use it before moving any building.
+- `src/wildlife.js` — cows/goats/foxes. **Animals live in `world.animals`, not `world.actors`.** `stepAnimal` is deterministic (no clocks, no `Math.random`); `animalOnHit` returns drops; `bleedTick`/`applyBleed` drive the damage-over-time.
+- `src/npc.js` — courtesan variant derived from `hashSeed(runSeed, tier, act)`. Never persisted: reloading and tier/act changes must reproduce the same look. `buildCourtesan(variant)` in `sprites.js` rebuilds the sprite.
+- `src/raycaster.js` — DDA walls, floor casting, billboards, weapon, suspicion bars, day/night shading. Fixed 640×360; the size is duplicated in `index.html` and `SCREEN_W/H`, and the FOV plane (0.66) lives in both `player.js` and `raycaster.js`. **Camera height and pitch are shear, not rotation:** `jumpZ` divides by depth (`(SCREEN_H*0.5 ± jumpZ)/perpDist` for walls, `/transformY` for sprites) — a constant offset on `drawStart` detaches walls from the floor. Pitch only shifts the horizon.
+- `src/ray.js` — pure single-ray DDA (`castRay`), tested in `tests/ray.test.js`. **A missed ray must return `dist = MAX_RAY_DIST`, never `0.05`.** The old inline version treated "no hit" as "wall in your face", which stretched a wall over the whole screen once the map grew past 80 tiles per ray. The step budget is derived from the map diagonal, not a magic number.
+- `src/dither.js` — Bayer dithering, deterministic grain, vignette, wall AO, murk tint. Pure. `DITHER_LEVELS = 16` with `ditherStrength = 0.28`; raising the strength turns the frame into visible dots (this happened once — screenshot before shipping).
+- `src/lighting.js` — lightmap (`Float32Array`), point lights, `sampleLight` with bilinear interpolation, flicker. `buildLightmap(world, ambient, time)` is rebuilt every frame in `main.js`; `AMBIENT[phase]` comes from `daynight.js`. **Sprites must be darkened with `ctx.filter = brightness(...)`** — they were drawn unfiltered once and glowed like flat rectangles at night.
+- `src/weather.js` — rain derived from `runSeed` only. **Never derive weather from current time or `Math.random`**, or reloading a checkpoint becomes a "make it dry" button. `stepWeather` ramps intensity smoothly; `dropPosition` is deterministic from index + time so drops don't jump between frames.
+- `world.js`'s `isWallTile` is the single source of truth; `ray.js` re-exports it. Adding a tile means editing `TILE`, `isWallTile`, and `textures.walls` together — `tests/ray.test.js` has a guard for wall tiles without a texture. `TILE.BRICK_FRAME = 6` and `TILE.PLASTER_FRAME = 7` are the fachwerk facades.
+- `src/enemies.js` — guard/driver AI. Calls `game.damagePlayer` and `game.onGuardAlert`, assigned in `main.js` at module scope. `updateActors` takes a small context object, not the whole `game`. Guards have `lastSeenX/Y` and a `search` state; don't remove the search branch without replacing the escape mechanic.
+- `src/style.js` — style telemetry → archetype → tuning. All multipliers are clamped by `TUNING_CAPS`; never let them escape, that's what keeps the game from punishing skill.
+- `src/contracts.js` — deterministic per-run/act/offer seed. `generateContracts` → 3 offers; `checkContract` is evaluated against a snapshot from `main.js`.
+- `src/profile.js` / `src/save.js` — meta progression and the single `corovans.save.v1` autosave slot. `migrateProfile` must always return a valid profile.
+- `src/rng.js` — `createRng(seed)` with saveable `state()`. All randomness in game logic must go through it; `Math.random` breaks save/restore determinism.
+- Pure, DOM-free logic (imported by Node tests): `inventory.js`, `economy.js`, `combat.js`, `world.js`, `rng.js`, `style.js`, `contracts.js`, `profile.js`, `run.js`, `daynight.js`, `motion.js`. Browser-only: `main.js`, `ui.js`, `audio.js`, `input.js`, `textures.js`, `sprites.js`, `raycaster.js`, `save.js`.
 
 ## Gameplay state quirks
 
-- `world.wagonLooted` blocks repeat looting. `spawnCamp(world, tier)` resets it and replaces camp guards; `main.js` schedules that only after loot is sold.
-- Stealing requires holding `E` within 2.5 of the wagon. Taking damage does not reset progress, but releasing `E` or leaving range does.
-- `game.wanted` comes from witnessed thefts and kills; the village guard turns hostile while it is above 0. The merchant clears it for a fee.
-- Losing pointer lock pauses the game. Trade/help set `game.uiOpen = true` before `exitLock()` so that loss doesn't also pause.
-- Player spawn is `(7.5, 24.5)`; the camp wagon is `(30.3, 8.1)`. The intended route is east along the road, then north.
+- `world.campGuards` is a subset of `world.actors` that includes the driver despite the name; `village_guard` and `merchant` are separate fields. `world.dormantGuards` holds sleepers.
+- `world.wagonLooted` blocks repeat looting. `spawnCamp(world, tier, tuning)` resets it and rebuilds guards/driver. Respawn is scheduled in `main.js` after loot is sold and postponed while the player is within 13 units of the wagon.
+- Stealing requires holding `E` within 2.5 of the wagon; releasing `E` or leaving range resets progress, damage does not. While stealing, `player.update` is skipped but AI still runs.
+- Blocking is `input.isBlocking()` → `player.blocking`; `combat.blockAbsorb` handles it in `damagePlayer` (front-only, costs 1.2× damage in stamina, 25% absorb when broken). Blocking disables attack and skips stamina regen. Landing a jump sets `noiseTimer`, which can wake sleepers — `wakeSleepers(world, x, y, radius)` is radius-based on purpose.
+- `enemies.js:updateActors` dispatches **by explicit species**. There is no `else` fallback: an unknown kind is left alone. Adding an animal to `world.actors` would make it patrol and attack like a guard — keep animals in `world.animals`.
+- Killing an animal must **not** add wanted level or act style "kill"; only humans do that. `performAttack` skips `merchant` and `courtesan` — the courtesan must never be a valid target.
+- `run.bleed` is persisted in the snapshot. If you add a damage-over-time effect, add it to `snapshotRun`/`restoreRun` too, otherwise reloading heals it for free.
+- `run.wanted` comes from witnessed thefts and kills; the village guard turns hostile above 0. The merchant clears it for a fee.
+- **Checkpoints only block during an active steal.** Do not gate saving on `wanted` or an active chase: guards spot the player almost immediately after a theft, and the run would silently stop saving. Actor positions/HP are never persisted, so reloading cannot reroll a camp.
+- `die()` is a soft death: reload the checkpoint, then apply −20% gold and drop all carried loot, then write a new checkpoint **so the penalty can't be undone by reloading**.
+- Losing pointer lock pauses the game. Trade/help/loot set `game.uiOpen = true` before `exitLock()` to suppress that; `ui.tradeOpen`/`helpOpen`/`lootOpen` are derived from DOM `hidden` classes and gate `canControl()`.
+- Victory needs `run.gold >= goalOf(run)` **and** `run.totalSold > 0`; `totalSold` grows only on sales, not caravan coin. Three acts: 300 → 800 → 1500.
+- Player spawn `(7.5, 24.5)`, camp wagon `(30.3, 8.1)`; route is east along the road, then north.
 
 ## Verification
 
-`npm run verify` covers syntax, economy/inventory/combat formulas, map collision, LOS, and caravan tier spawning. For a browser smoke test, use `?debug=1` and check: start → walk east/north → hold `E` at the wagon → sell at Mardo → buy an upgrade → wait for the next caravan. Also check pause, death, and the 300-gold victory overlay.
+`npm run verify` covers syntax plus 109 unit tests: RNG determinism, style caps, contract pass/fail per type, profile migration, save/restore, checkpoint rules, soft-death math (rounded up, so "20%" is not a lie), camp archetypes, day phases, jump physics, pitch clamping, block absorb, wildlife behaviour and drops, bleed ticks, courtesan variants, map reachability (flood-fill spawn → merchant → courtesan → wagon), ray geometry (no false hits, no screen-filling walls), dithering and lightmap math, weather determinism and ramps, map collision and LOS.
+
+`tests/logic.test.js` asserts exact map coordinates, guard counts (`tier + 1`) and HP formulas — changing the map or tier scaling means updating those assertions in the same commit.
+
+Manual smoke test with `?debug=1`: start → walk east/north → hold `E` at the wagon → pick loot → sell at Mardo → take a contract → wait for the next caravan; then reload and check «Продолжить» restores gold and the contract, and that death costs 20% but keeps reputation.
+
+## Gotchas
+
+- Git commands fail with "dubious ownership" for `E:/Corovans`; run `git config --global --add safe.directory E:/Corovans` first.
+- **Never bind `Ctrl`.** `Ctrl+W` closes the tab and cannot be cancelled by `preventDefault()`, so crouch is `C` (hold) and `Ctrl` is deliberately unused. Space is jump, not attack; attack is LMB only.
+- `player.jumpZ` is a getter over `player.jump.z`; assigning to it throws in ES-module strict mode. Mutate `player.jump`, or use `requestJump()`.
+- `audio.init()` and `input.requestLock()` only work inside a user gesture (start button click); don't call them from module scope.
+- `localStorage` may be unavailable (private mode); the game must run without saving rather than crash.
+- Headless smoke checks run in a **fresh temp profile**, so they never expose stale-module caching. When a user reports "the fix isn't there", verify the served bytes (`fetch` the module and check for the new symbol) and the `build` stamp before touching code. `python -m http.server` returning `304` for `src/*.js` is the classic cause.
+- **Logic tests do not cover rendering.** A green `npm run verify` once shipped a screen-filling wall artifact. Rendering changes need a pixel check: capture the canvas and assert no column band is a flat grey run (`visual.mjs`-style check), plus screenshots at several map points. Pure-geometry regressions belong in `tests/ray.test.js`.
+- The canvas is scaled by an **integer factor** in `main.js:applyCanvasScale` (640×360 → 1280×720 at 2×). Non-integer scaling with `image-rendering: pixelated` blurs the picture; don't reintroduce `width: 100%` on `#game`. Expect black bars on non-multiple screens.

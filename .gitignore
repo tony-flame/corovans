@@ -3,3 +3,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Локальные заметки и артефакты отладки
+.idea/
+.vscode/
+*.tmp
+*.bak
+scratch/

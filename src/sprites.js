@@ -21,6 +21,92 @@ function ellipse(ctx, x, y, rx, ry, color) {
   ctx.fill();
 }
 
+// Куртизанка: цвета волос и платья приходят из варианта (npc.js).
+// Вызывается заново при смене каравана и акта.
+export function buildCourtesan(variant) {
+  const hair = variant?.hair?.css || "#7a4a2a";
+  const dress = variant?.dress?.css || "#6d1f2e";
+  const accessory = variant?.accessory || "веер";
+
+  return make(48, 92, (ctx) => {
+    // подол платья
+    ctx.fillStyle = dress;
+    ctx.beginPath();
+    ctx.moveTo(24, 34);
+    ctx.lineTo(40, 88);
+    ctx.lineTo(8, 88);
+    ctx.closePath();
+    ctx.fill();
+    // блик ткани
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath();
+    ctx.moveTo(24, 36);
+    ctx.lineTo(30, 86);
+    ctx.lineTo(24, 86);
+    ctx.closePath();
+    ctx.fill();
+    // корсет
+    rect(ctx, 17, 44, 14, 18, dress);
+    rect(ctx, 23, 44, 2, 18, "rgba(0,0,0,0.25)");
+    // руки
+    rect(ctx, 13, 46, 4, 16, "#e2bda0");
+    rect(ctx, 31, 46, 4, 16, "#e2bda0");
+    // шея и голова
+    rect(ctx, 22, 36, 4, 8, "#e2bda0");
+    ellipse(ctx, 24, 26, 8, 9, "#efcdb0");
+    // волосы
+    ctx.fillStyle = hair;
+    ctx.beginPath();
+    ctx.moveTo(15, 26);
+    ctx.quadraticCurveTo(14, 10, 24, 9);
+    ctx.quadraticCurveTo(34, 10, 33, 26);
+    ctx.lineTo(31, 20);
+    ctx.quadraticCurveTo(24, 16, 17, 20);
+    ctx.closePath();
+    ctx.fill();
+    rect(ctx, 14, 24, 3, 18, hair);
+    rect(ctx, 31, 24, 3, 18, hair);
+    // глаза и губы
+    rect(ctx, 20, 26, 2, 2, "#2a1d16");
+    rect(ctx, 27, 26, 2, 2, "#2a1d16");
+    rect(ctx, 22, 32, 5, 2, "#b5404a");
+    // украшение на шее
+    rect(ctx, 19, 44, 10, 2, "#c9a24a");
+    ellipse(ctx, 24, 47, 2, 2, "#e2d07a");
+    // аксессуар
+    if (accessory === "веер") {
+      ctx.fillStyle = "#e8dcc8";
+      ctx.beginPath();
+      ctx.moveTo(36, 52);
+      ctx.lineTo(46, 40);
+      ctx.lineTo(44, 56);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#8a7d68";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else if (accessory === "вуаль") {
+      ctx.fillStyle = "rgba(232,220,200,0.35)";
+      ctx.beginPath();
+      ctx.moveTo(16, 18);
+      ctx.quadraticCurveTo(24, 30, 32, 18);
+      ctx.lineTo(32, 34);
+      ctx.quadraticCurveTo(24, 40, 16, 34);
+      ctx.closePath();
+      ctx.fill();
+    } else if (accessory === "перья") {
+      ellipse(ctx, 33, 12, 3, 8, "#c94a3e");
+      ellipse(ctx, 37, 14, 2, 7, "#e2d07a");
+    } else if (accessory === "брошь") {
+      ellipse(ctx, 24, 45, 3, 3, "#e2d07a");
+      ellipse(ctx, 24, 45, 1.4, 1.4, "#c94a3e");
+    } else if (accessory === "муфта") {
+      ellipse(ctx, 24, 62, 8, 5, "#8a6a3a");
+      ellipse(ctx, 24, 60, 6, 3, "#a8894f");
+    }
+  });
+}
+
 function guard(ctx, tabard, trim) {
   // копьё
   rect(ctx, 9, 6, 2, 76, "#5b4127");
@@ -83,6 +169,9 @@ export function buildSprites() {
       ctx.quadraticCurveTo(46, 56, 40, 66);
       ctx.stroke();
     }),
+
+    // Заглушка: настоящий спрайт подставляется из buildCourtesan() по варианту.
+    courtesan: make(48, 92, () => {}),
 
     merchant: make(48, 84, (ctx) => {
       rect(ctx, 16, 72, 7, 10, "#2a2119");
@@ -341,6 +430,212 @@ export function buildSprites() {
       ellipse(ctx, 13, 11, 8, 6, "#5a4636");
       rect(ctx, 30, 10, 14, 5, "#2a2119");
       ellipse(ctx, 24, 12, 3, 2, "#6d1c16");
+    }),
+
+    // ── Живность ──
+
+    cow: make(84, 62, (ctx) => {
+      for (const lx of [16, 28, 54, 66]) rect(ctx, lx, 42, 7, 20, "#3b2a1e");
+      ellipse(ctx, 42, 32, 28, 16, "#e6ddcd");
+      // пятна
+      ellipse(ctx, 32, 26, 10, 7, "#332c25");
+      ellipse(ctx, 54, 36, 8, 6, "#332c25");
+      // голова
+      ellipse(ctx, 72, 22, 12, 10, "#e6ddcd");
+      ellipse(ctx, 78, 28, 7, 5, "#d8cbb6");
+      ellipse(ctx, 74, 20, 2, 2, "#1c1712");
+      // рога и уши
+      rect(ctx, 66, 12, 3, 6, "#c9b98c");
+      rect(ctx, 76, 13, 3, 5, "#c9b98c");
+      ellipse(ctx, 64, 20, 4, 2, "#c9b98c");
+      // вымя и хвост
+      ellipse(ctx, 40, 46, 6, 4, "#e0a89a");
+      ctx.strokeStyle = "#3b2a1e";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(15, 28);
+      ctx.quadraticCurveTo(8, 38, 13, 48);
+      ctx.stroke();
+    }),
+
+    goat: make(64, 56, (ctx) => {
+      for (const lx of [14, 22, 40, 48]) rect(ctx, lx, 38, 5, 16, "#4a3a2a");
+      ellipse(ctx, 32, 30, 20, 12, "#cfc4b0");
+      ellipse(ctx, 54, 20, 9, 8, "#cfc4b0");
+      // борода
+      ctx.fillStyle = "#8a7d68";
+      ctx.beginPath();
+      ctx.moveTo(56, 26);
+      ctx.lineTo(58, 36);
+      ctx.lineTo(52, 28);
+      ctx.closePath();
+      ctx.fill();
+      // рога
+      ctx.strokeStyle = "#8a7d68";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(50, 13);
+      ctx.quadraticCurveTo(46, 4, 52, 2);
+      ctx.moveTo(57, 12);
+      ctx.quadraticCurveTo(62, 4, 58, 1);
+      ctx.stroke();
+      ellipse(ctx, 56, 19, 1.6, 1.6, "#1c1712");
+      rect(ctx, 54, 24, 4, 3, "#b9a992");
+    }),
+
+    fox: make(62, 40, (ctx) => {
+      for (const lx of [14, 22, 40, 48]) rect(ctx, lx, 27, 5, 11, "#3a2214");
+      ellipse(ctx, 32, 22, 20, 10, "#b4561e");
+      // хвост
+      ctx.fillStyle = "#c86a28";
+      ctx.beginPath();
+      ctx.moveTo(14, 18);
+      ctx.quadraticCurveTo(2, 16, 4, 28);
+      ctx.quadraticCurveTo(10, 24, 14, 24);
+      ctx.fill();
+      ellipse(ctx, 5, 26, 4, 3, "#e8dcc8");
+      // голова
+      ellipse(ctx, 52, 16, 9, 7, "#c86a28");
+      ctx.fillStyle = "#c86a28";
+      ctx.beginPath();
+      ctx.moveTo(56, 12);
+      ctx.lineTo(62, 8);
+      ctx.lineTo(57, 18);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(52, 11);
+      ctx.lineTo(50, 3);
+      ctx.lineTo(57, 10);
+      ctx.closePath();
+      ctx.fill();
+      ellipse(ctx, 56, 17, 1.6, 1.6, "#1c1712");
+      ellipse(ctx, 60, 19, 2, 1.4, "#1c1712");
+      // белая грудь
+      ellipse(ctx, 44, 24, 6, 4, "#e8dcc8");
+    }),
+
+    // ── Куртизанка: цвета подставляются из варианта ──
+
+    well: make(56, 54, (ctx) => {
+      ellipse(ctx, 28, 44, 22, 8, "#5a5348");
+      rect(ctx, 8, 18, 6, 26, "#6b6357");
+      rect(ctx, 42, 18, 6, 26, "#6b6357");
+      ellipse(ctx, 28, 46, 16, 6, "#2a2a2e");
+      ellipse(ctx, 28, 45, 12, 4, "#1a2a33");
+      // крыша
+      ctx.fillStyle = "#6b4a28";
+      ctx.beginPath();
+      ctx.moveTo(4, 20);
+      ctx.lineTo(28, 4);
+      ctx.lineTo(52, 20);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 26, 8, 3, 18, "#8d6335");
+      rect(ctx, 25, 24, 6, 5, "#4a321e");
+    }),
+
+    fence: make(48, 34, (ctx) => {
+      for (const fx of [4, 20, 36]) {
+        rect(ctx, fx, 6, 5, 26, "#6b4a28");
+        rect(ctx, fx, 6, 2, 26, "#8d6335");
+      }
+      rect(ctx, 2, 13, 44, 4, "#7a5228");
+      rect(ctx, 2, 23, 44, 4, "#7a5228");
+    }),
+
+    haystack: make(60, 56, (ctx) => {
+      ellipse(ctx, 30, 46, 26, 10, "#8a7a3a");
+      ctx.fillStyle = "#c9b25a";
+      ctx.beginPath();
+      ctx.moveTo(6, 46);
+      ctx.quadraticCurveTo(30, 2, 54, 46);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#a89440";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(12 + i * 7, 44);
+        ctx.quadraticCurveTo(28 + i * 2, 24 + i * 2, 22 + i * 6, 12 + i);
+        ctx.stroke();
+      }
+    }),
+
+    milestone: make(30, 46, (ctx) => {
+      rect(ctx, 12, 14, 7, 30, "#8a8578");
+      rect(ctx, 13, 14, 3, 30, "#a5a094");
+      rect(ctx, 4, 6, 23, 12, "#9a9488");
+      rect(ctx, 6, 10, 19, 2, "#4a463f");
+      rect(ctx, 6, 14, 13, 2, "#4a463f");
+    }),
+
+    windmill: make(96, 118, (ctx) => {
+      // башня
+      ctx.fillStyle = "#8a7f68";
+      ctx.beginPath();
+      ctx.moveTo(30, 112);
+      ctx.lineTo(38, 34);
+      ctx.lineTo(58, 34);
+      ctx.lineTo(66, 112);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#6b6252";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(34 + i * 2, 106 - i * 18);
+        ctx.lineTo(62 - i * 2, 106 - i * 18);
+        ctx.stroke();
+      }
+      rect(ctx, 40, 96, 16, 16, "#3a2a1c");
+      // крыша
+      ctx.fillStyle = "#6b4a28";
+      ctx.beginPath();
+      ctx.moveTo(30, 34);
+      ctx.lineTo(48, 12);
+      ctx.lineTo(66, 34);
+      ctx.closePath();
+      ctx.fill();
+      // лопасти
+      ctx.strokeStyle = "#5c4a30";
+      ctx.lineWidth = 4;
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(48, 40);
+        ctx.lineTo(48 + Math.cos(a) * 42, 40 + Math.sin(a) * 42);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#bfae82";
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        ctx.save();
+        ctx.translate(48, 40);
+        ctx.rotate(a);
+        ctx.fillRect(10, -4, 34, 8);
+        ctx.restore();
+      }
+      ellipse(ctx, 48, 40, 5, 5, "#3a2a1c");
+    }),
+
+    basket: make(30, 26, (ctx) => {
+      ctx.fillStyle = "#8a6a3a";
+      ctx.beginPath();
+      ctx.moveTo(6, 10);
+      ctx.lineTo(24, 10);
+      ctx.lineTo(21, 22);
+      ctx.lineTo(9, 22);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 5, 8, 20, 3, "#a8894f");
+      ctx.strokeStyle = "#a8894f";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(15, 8, 6, Math.PI, 0);
+      ctx.stroke();
+      ellipse(ctx, 12, 8, 3, 2, "#c94a3e");
+      ellipse(ctx, 17, 7, 3, 2, "#b8a23a");
     }),
 
     bush: make(56, 48, (ctx) => {

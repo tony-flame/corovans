@@ -3,6 +3,7 @@ export class Input {
     this.canvas = canvas;
     this.handlers = handlers;
     this.keys = new Set();
+    this.mouseButtons = new Set();
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.locked = false;
@@ -19,7 +20,7 @@ export class Input {
       this.handlers.keyUp?.(e.code);
     });
 
-    window.addEventListener("blur", () => this.keys.clear());
+    window.addEventListener("blur", () => this.reset());
 
     document.addEventListener("mousemove", (e) => {
       if (!this.locked) return;
@@ -28,10 +29,17 @@ export class Input {
     });
 
     canvas.addEventListener("mousedown", (e) => {
-      if (e.button === 0 && this.locked) {
-        this.handlers.attack?.();
-        e.preventDefault();
-      }
+      if (!this.locked) return;
+      this.mouseButtons.add(e.button);
+      if (e.button === 0) this.handlers.attack?.();
+      else if (e.button === 2) this.handlers.blockStart?.();
+      e.preventDefault();
+    });
+
+    // На document: при pointer lock mouseup на canvas ловится не всегда.
+    document.addEventListener("mouseup", (e) => {
+      this.mouseButtons.delete(e.button);
+      if (e.button === 2) this.handlers.blockEnd?.();
     });
 
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -39,6 +47,7 @@ export class Input {
     document.addEventListener("pointerlockchange", () => {
       const wasLocked = this.locked;
       this.locked = document.pointerLockElement === canvas;
+      if (!this.locked) this.mouseButtons.clear();
       if (wasLocked !== this.locked) this.handlers.lockChange?.(this.locked);
     });
 
@@ -51,6 +60,10 @@ export class Input {
     return this.keys.has(code);
   }
 
+  isBlocking() {
+    return this.mouseButtons.has(2);
+  }
+
   consumeMouse() {
     const dx = this.mouseDX;
     const dy = this.mouseDY;
@@ -61,6 +74,14 @@ export class Input {
 
   clear() {
     this.keys.clear();
+    this.mouseButtons.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+  }
+
+  reset() {
+    this.keys.clear();
+    this.mouseButtons.clear();
     this.mouseDX = 0;
     this.mouseDY = 0;
   }

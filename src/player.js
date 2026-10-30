@@ -1,4 +1,18 @@
 import { moveActor } from "./world.js";
+import {
+  createJumpState,
+  startJump,
+  stepJump,
+  canJump,
+  addPitch,
+  viewOffset,
+  JUMP_STAMINA,
+} from "./motion.js";
+
+// Ctrl не используется намеренно: Ctrl+W закрывает вкладку и не отменяется
+// через preventDefault. Приседание — C (удержание).
+const CROUCH_KEYS = ["KeyC"];
+const BLOCK_SPEED_FACTOR = 0.72;
 
 export class Player {
   constructor(spawn) {
@@ -10,6 +24,7 @@ export class Player {
     this.planeX = 0;
     this.planeY = 0.66;
     this.radius = 0.26;
+    this.pitch = 0;
 
     this.maxHealth = 100;
     this.health = 100;
@@ -18,11 +33,14 @@ export class Player {
 
     this.crouching = false;
     this.sprinting = false;
+    this.blocking = false;
+    this.blockBroke = false;
     this.walkPhase = 0;
     this.bobY = 0;
     this.bobTime = 0;
     this.stepDistance = 0;
-
+    this.jump = createJumpState();
+    this.landedThisFrame = false;
     this.swingT = 0;
     this.attackCd = 0;
     this.hurtFlash = 0;
@@ -41,10 +59,15 @@ export class Player {
     this.setAngle(this.angle + delta);
   }
 
+  look(deltaY) {
+    this.pitch = addPitch(this.pitch, deltaY);
+  }
+
   reset(spawn) {
     this.x = spawn.x;
     this.y = spawn.y;
     this.setAngle(0);
+    this.pitch = 0;
     this.health = this.maxHealth;
     this.stamina = this.maxStamina;
     this.dead = false;
@@ -52,6 +75,27 @@ export class Player {
     this.attackCd = 0;
     this.hurtFlash = 0;
     this.bobY = 0;
+    this.jump = createJumpState();
+    this.crouching = false;
+    this.sprinting = false;
+    this.blocking = false;
+    this.blockBroke = false;
+  }
+
+  requestJump() {
+    if (!canJump(this.jump, this, JUMP_STAMINA)) return false;
+    this.jump = startJump(this.jump);
+    this.stamina = Math.max(0, this.stamina - JUMP_STAMINA);
+    return true;
+  }
+
+  // Высота камеры для рендера: прыжок вверх, приседание вниз.
+  get eyeOffset() {
+    return viewOffset(this.jump, this.crouching);
+  }
+
+  get jumpZ() {
+    return this.jump.z;
   }
 
   update(world, input, dt, state, audio) {
@@ -60,23 +104,34 @@ export class Player {
     this.attackCd = Math.max(0, this.attackCd - dt);
     this.swingT = Math.max(0, this.swingT - dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
+    this.blockBroke = Math.max(0, this.blockBroke - dt);
 
-    this.crouching = input.isDown("ControlLeft") || input.isDown("ControlRight");
+    const jumpStep = stepJump(this.jump, dt);
+    this.jump = jumpStep.state;
+    this.landedThisFrame = jumpStep.landed;
+
+    this.crouching = CROUCH_KEYS.some((code) => input.isDown(code)) && this.jump.grounded;
+    this.blocking = input.isBlocking() && this.jump.grounded;
+
     const forward = (input.isDown("KeyW") ? 1 : 0) - (input.isDown("KeyS") ? 1 : 0);
     const strafe = (input.isDown("KeyD") ? 1 : 0) - (input.isDown("KeyA") ? 1 : 0);
     const wantsSprint =
-      (input.isDown("ShiftLeft") || input.isDown("ShiftRight")) && forward > 0 && this.stamina > 1;
+      (input.isDown("ShiftLeft") || input.isDown("ShiftRight")) &&
+      forward > 0 &&
+      this.stamina > 1 &&
+      !this.blocking;
 
     this.sprinting = wantsSprint && !this.crouching;
     const boots = state.upgrades.boots;
     let speed = 2.35 * (1 + boots * 0.08);
     if (this.crouching) speed *= 0.52;
     else if (this.sprinting) speed *= 1.62;
+    if (this.blocking) speed *= BLOCK_SPEED_FACTOR;
 
     if (this.sprinting) {
       this.stamina = Math.max(0, this.stamina - 24 * dt);
       if (this.stamina <= 0) this.sprinting = false;
-    } else {
+    } else if (!this.blocking) {
       this.stamina = Math.min(this.maxStamina, this.stamina + (this.crouching ? 10 : 16) * dt);
     }
 

@@ -1,4 +1,5 @@
-import { lineOfSight, moveActor } from "./world.js";
+import { lineOfSight, moveActor, wakeSleepers } from "./world.js";
+import { phaseOf, phaseInfo } from "./daynight.js";
 
 function moveToward(world, actor, tx, ty, speed, dt) {
   const dx = tx - actor.x;
@@ -19,11 +20,17 @@ function moveToward(world, actor, tx, ty, speed, dt) {
   return dist;
 }
 
-function perceive(actor, player, world, wanted) {
+// Множитель обзора от фазы суток. Ночью стража видит хуже.
+function daylightFactor(game) {
+  const info = phaseInfo(phaseOf(game.dayTime || 0));
+  return info.guardSeeing;
+}
+
+function perceive(actor, player, world, wanted, game) {
   const dx = player.x - actor.x;
   const dy = player.y - actor.y;
   const dist = Math.hypot(dx, dy);
-  let range = actor.viewRange;
+  let range = actor.viewRange * daylightFactor(game);
   if (player.crouching) range *= 0.55;
   if (player.sprinting) range *= 1.3;
   if (actor.kind === "village_guard" && wanted > 0) range = Math.max(range, 14);
@@ -48,6 +55,7 @@ function alertNearby(game, source) {
       other.suspicion = 1.2;
       other.alerted = true;
       other.lostTimer = 0;
+      if (other.asleep) other.asleep = false;
     }
   }
 }
@@ -57,6 +65,8 @@ function startChase(game, actor) {
     actor.state = "chase";
     actor.alerted = true;
     actor.lostTimer = 0;
+    actor.lastSeenX = game.player.x;
+    actor.lastSeenY = game.player.y;
     game.onGuardAlert(actor);
     alertNearby(game, actor);
   }
@@ -71,7 +81,22 @@ function updateGuard(game, actor, dt) {
   if (player.dead) {
     actor.state = "idle";
     actor.suspicion = 0;
+    actor.asleep = false;
     return;
+  }
+
+  // Спящий страж просыпается от шума рядом или от тревоги соседей.
+  if (actor.asleep) {
+    const noiseWake = (game.noiseLevel || 0) > 0.5 && dist < 5;
+    if (noiseWake) {
+      actor.asleep = false;
+      actor.suspicion = 1;
+      actor.state = "return";
+      actor.lostTimer = 0;
+    } else {
+      actor.suspicion = Math.max(0, actor.suspicion - dt * 0.3);
+      return;
+    }
   }
 
   if (actor.kind === "village_guard" && game.wanted > 0 && dist < 22) {
@@ -79,7 +104,7 @@ function updateGuard(game, actor, dt) {
     if (visible) startChase(game, actor);
   }
 
-  const seen = perceive(actor, player, world, game.wanted);
+  const seen = perceive(actor, player, world, game.wanted, game);
   if (seen) {
     const range = Math.max(1, actor.viewRange);
     const gain = 0.75 + Math.max(0, 1 - dist / range) * 1.6;
@@ -87,6 +112,8 @@ function updateGuard(game, actor, dt) {
       2,
       actor.suspicion + dt * gain * (player.crouching ? 0.55 : 1) * (1 + (game.noiseLevel || 0) * 0.5)
     );
+    actor.lastSeenX = player.x;
+    actor.lastSeenY = player.y;
     if (actor.suspicion >= 1) startChase(game, actor);
   } else if (actor.state !== "chase") {
     actor.suspicion = Math.max(0, actor.suspicion - dt * 0.4);
@@ -96,9 +123,11 @@ function updateGuard(game, actor, dt) {
     if (seen) actor.lostTimer = 0;
     else actor.lostTimer += dt;
 
+    // Потеряв игрока, страж идёт к точке последнего контакта, а не телепортируется.
     if (actor.lostTimer > 4.5) {
-      actor.state = "return";
-      actor.suspicion = 0.5;
+      actor.state = "search";
+      actor.suspicion = 0.6;
+      actor.searchTimer = 0;
       return;
     }
 
@@ -107,6 +136,22 @@ function updateGuard(game, actor, dt) {
     } else if (actor.attackCd <= 0 && seen) {
       actor.attackCd = 1.15;
       game.damagePlayer(actor.damage, actor);
+    }
+    return;
+  }
+
+  // Память: поиск в последней известной точке, потом возврат на пост.
+  if (actor.state === "search") {
+    actor.searchTimer = (actor.searchTimer || 0) + dt;
+    const tx = actor.lastSeenX !== null ? actor.lastSeenX : actor.homeX;
+    const ty = actor.lastSeenY !== null ? actor.lastSeenY : actor.homeY;
+    const reached = moveToward(world, actor, tx, ty, actor.speed * 0.9, dt);
+    if (reached < 0.6) actor.searchTimer += dt * 1.5;
+    if (actor.searchTimer > 6) {
+      actor.state = "return";
+      actor.suspicion = 0.3;
+      actor.lastSeenX = null;
+      actor.lastSeenY = null;
     }
     return;
   }
@@ -147,7 +192,7 @@ function updateDriver(game, actor, dt) {
     return;
   }
 
-  const seen = perceive(actor, player, world, game.wanted);
+  const seen = perceive(actor, player, world, game.wanted, game);
   if (seen) {
     actor.suspicion = Math.min(2, actor.suspicion + dt * 1.4);
     if (actor.suspicion > 0.55) {
@@ -163,11 +208,40 @@ function updateDriver(game, actor, dt) {
   if (point) moveToward(world, actor, point.x, point.y, 0.4, dt);
 }
 
+// Максимальное подозрение по лагерю — для индикатора «глаз» в HUD.
+// Только люди: над коровой полоска подозрения выглядела бы как баг.
+export function maxSuspicion(world) {
+  let max = 0;
+  let chasing = false;
+  for (const actor of world.actors) {
+    if (!actor.alive) continue;
+    if (actor.kind !== "guard" && actor.kind !== "village_guard" && actor.kind !== "driver") continue;
+    if (actor.state === "chase") chasing = true;
+    if (actor.suspicion > max) max = actor.suspicion;
+  }
+  return { value: Math.min(1, max), chasing };
+}
+
 export function updateActors(game, dt) {
+  // Шум поднимает спящих рядом с игроком: красться тихо — единственный способ не разбудить.
+  if ((game.noiseLevel || 0) > 0.5) wakeSleepers(game.world, game.player.x, game.player.y, 7);
+
   for (const actor of game.world.actors) {
-    if (!actor.alive || actor.kind === "merchant") continue;
-    actor.attackCd = Math.max(0, actor.attackCd - dt);
-    if (actor.kind === "driver") updateDriver(game, actor, dt);
-    else updateGuard(game, actor, dt);
+    if (!actor.alive) continue;
+
+    // Явный диспетчер по видам. Без него любое новое существо попадает
+    // в updateGuard и начинает патрулировать и бить игрока.
+    if (actor.kind === "merchant" || actor.kind === "courtesan") continue;
+    if (actor.kind === "driver") {
+      actor.attackCd = Math.max(0, actor.attackCd - dt);
+      updateDriver(game, actor, dt);
+      continue;
+    }
+    if (actor.kind === "guard" || actor.kind === "village_guard") {
+      actor.attackCd = Math.max(0, actor.attackCd - dt);
+      updateGuard(game, actor, dt);
+      continue;
+    }
+    // Неизвестный вид: не трогаем. Лучше неподвижный NPC, чем стражник-корова.
   }
 }

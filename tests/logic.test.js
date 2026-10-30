@@ -89,10 +89,17 @@ test("world: спавн, стены и дорога", () => {
   const world = createWorld();
   assert.equal(isSolid(world, world.spawn.x, world.spawn.y), false);
   assert.equal(canStand(world, world.spawn.x, world.spawn.y, 0.26), true);
-  assert.equal(tileAt(world, 10.5, 23.5), TILE.ROAD);
-  assert.equal(canStand(world, 6, 20, 0.26), false, "внутри дома стоять нельзя");
-  assert.equal(lineOfSight(world, 7.5, 24.5, 20, 24.5), true);
-  assert.equal(lineOfSight(world, 5.5, 24.5, 5.5, 19.5), false, "дом перекрывает обзор");
+
+  // Тракт идёт по y=86..87 через всю карту.
+  assert.equal(tileAt(world, 60.5, 86.5), TILE.ROAD);
+  assert.equal(tileAt(world, 98.5, 60.5), TILE.ROAD, "поворот на север — дорога");
+
+  // Дом в деревне непроходим.
+  assert.equal(canStand(world, 11, 72, 0.26), false, "внутри дома стоять нельзя");
+
+  // Обзор вдоль улицы свободен, сквозь дом — нет.
+  assert.equal(lineOfSight(world, 12.5, 92.5, 30.5, 92.5), true, "площадь просматривается");
+  assert.equal(lineOfSight(world, 11, 72, 11, 78), false, "дом перекрывает обзор");
 });
 
 test("world: уровни каравана и сброс фургона", () => {

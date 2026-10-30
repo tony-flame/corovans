@@ -53,6 +53,7 @@ export function fineFor(wanted) {
   return wanted > 0 ? 40 + wanted * 60 : 0;
 }
 
-export function sellMultiplier(upgrades) {
-  return 1 + (upgrades.lockpick || 0) * 0.05;
+// extra — бонус от разблокировки «свой скупщик», фаз суток и стиля.
+export function sellMultiplier(upgrades, extra = 1) {
+  return (1 + (upgrades.lockpick || 0) * 0.05) * extra;
 }

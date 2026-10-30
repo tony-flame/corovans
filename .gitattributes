@@ -1,0 +1,8 @@
+# Нормализуем окончания строк: в репозитории LF, на Windows git сам решит при checkout.
+* text=auto eol=lf
+
+# Бинарные файлы не трогаем.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
