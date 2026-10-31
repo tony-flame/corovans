@@ -136,17 +136,32 @@ const RUMORS = [
   "Скупщик не любит, когда торгуются. Терпит, но запоминает.",
 ];
 
-export function courtesanSeed(runSeed, tier, act) {
-  return hashSeed(`${runSeed}:${tier}:${act}:courtesan`);
+// Места, где стоят куртизанки. Ключ привязанности — МЕСТО, а не вариант:
+// внешность меняется с караваном, а дружба должна оставаться с игроком.
+export const COURTESAN_SPOTS = ["square", "inn", "forest", "camp"];
+
+export const SPOT_LABELS = {
+  square: "Площадь",
+  inn: "Корчма",
+  forest: "Лесная сторожка",
+  camp: "Стоянка каравана",
+};
+
+// Сколько платных визитов нужно, чтобы она начала принимать бесплатно.
+export const AFFINITY_FREE = 2;
+
+export function courtesanSeed(runSeed, tier, act, spot = "square") {
+  return hashSeed(`${runSeed}:${tier}:${act}:courtesan:${spot}`);
 }
 
 function pickFrom(list, rng) {
   return list[Math.floor(rng() * list.length) % list.length];
 }
 
-// Вариант внешности и характера. Меняется при смене каравана и акта.
-export function createCourtesan(runSeed, tier = 1, act = 0) {
-  const seed = courtesanSeed(runSeed, tier, act);
+// Вариант внешности и характера. Меняется при смене каравана и акта,
+// но остаётся в пределах своего места.
+export function createCourtesan(runSeed, tier = 1, act = 0, spot = "square") {
+  const seed = courtesanSeed(runSeed, tier, act, spot);
   const rng = createRng(seed);
 
   const name = pickFrom(NAMES, rng);
@@ -164,6 +179,8 @@ export function createCourtesan(runSeed, tier = 1, act = 0) {
 
   return {
     id: seed,
+    spot,
+    spotLabel: SPOT_LABELS[spot] || spot,
     name,
     epithet,
     displayName: display,
@@ -180,6 +197,32 @@ export function createCourtesan(runSeed, tier = 1, act = 0) {
   };
 }
 
+// ── Привязанность ───────────────────────────────────────────────────
+// Хранится в ране по ключу места. Платные визиты её повышают,
+// бесплатные — нет, иначе первый же бесплатный визит сделал бы её вечной.
+
+export function createAffinity() {
+  const map = {};
+  for (const spot of COURTESAN_SPOTS) map[spot] = 0;
+  return map;
+}
+
+export function affinityOf(affinity, spot) {
+  if (!affinity || !spot) return 0;
+  return Math.max(0, affinity[spot] || 0);
+}
+
+// Она уже принимает бесплатно?
+export function isFreeVisit(affinity, spot) {
+  return affinityOf(affinity, spot) >= AFFINITY_FREE;
+}
+
+export function bumpAffinity(affinity, spot) {
+  const next = { ...(affinity || createAffinity()) };
+  next[spot] = Math.min(AFFINITY_FREE + 1, affinityOf(next, spot) + 1);
+  return next;
+}
+
 function fill(line, courtesan) {
   return String(line).replace("{name}", courtesan.name);
 }
@@ -190,7 +233,9 @@ export function greetCourtesan(courtesan, rng = Math.random, state = {}) {
   let line = fill(pickFrom(pool, rng), courtesan);
 
   // Контекст важнее характера: за игроком охотятся — она это заметит.
-  if (state.wanted > 0) {
+  if (state.free) {
+    line = `${courtesan.name} отмахивается от монеты: «Убери. С тебя я больше не беру.»`;
+  } else if (state.wanted > 0) {
     line = `${courtesan.name} понижает голос: «За тобой идут. Ладно, заходи быстрее.»`;
   } else if (state.bled && state.bled > 0) {
     line = `${courtesan.name} хмурится: «Ты кровью капаешь на мой пол. Заходи.»`;
@@ -221,18 +266,20 @@ export function rumorCount() {
 }
 
 // Услуга доступна, пока есть куда лечиться или добирать бодрость.
-export function courtesanCanServe(courtesan, gold, health, maxHealth, overheal = 0) {
+// free=true — она уже принимает бесплатно: платить не нужно, но и запаса не даёт.
+export function courtesanCanServe(courtesan, gold, health, maxHealth, overheal = 0, free = false) {
   if (!courtesan) return { ok: false, reason: "no_courtesan" };
   const total = health + Math.max(0, overheal);
   const ceiling = maxHealth + OVERHEAL_CAP;
   if (total >= ceiling) return { ok: false, reason: "full_health" };
-  if (gold < courtesan.price) return { ok: false, reason: "no_gold" };
-  return { ok: true, reason: "" };
+  if (!free && gold < courtesan.price) return { ok: false, reason: "no_gold" };
+  return { ok: true, reason: "", free: Boolean(free) };
 }
 
 // Лечение: сначала здоровье до максимума, остаток — в запас бодрости.
+// Бесплатный визит запас НЕ даёт: иначе привязанность отменяет экономику.
 // Возвращает { health, overheal, gold, healed, topped }.
-export function applyHeal(courtesan, gold, health, maxHealth, overheal = 0) {
+export function applyHeal(courtesan, gold, health, maxHealth, overheal = 0, free = false) {
   const safeHealth = Math.max(0, Math.min(maxHealth, health));
   const safeOver = Math.max(0, Math.min(OVERHEAL_CAP, overheal));
   let room = maxHealth + OVERHEAL_CAP - (safeHealth + safeOver);
@@ -241,15 +288,17 @@ export function applyHeal(courtesan, gold, health, maxHealth, overheal = 0) {
   const newHealth = safeHealth + Math.max(0, healToMax);
   room -= Math.max(0, healToMax);
 
-  const overGain = Math.min(room, OVERHEAL_CAP - safeOver);
+  // Бесплатно — только здоровье, без запаса.
+  const overGain = free ? 0 : Math.min(room, OVERHEAL_CAP - safeOver);
   const newOver = safeOver + Math.max(0, overGain);
 
   return {
     health: newHealth,
     overheal: newOver,
-    gold: Math.max(0, gold - (courtesan ? courtesan.price : 0)),
+    gold: free ? gold : Math.max(0, gold - (courtesan ? courtesan.price : 0)),
     healed: newHealth - safeHealth,
     topped: newOver - safeOver,
+    free: Boolean(free),
   };
 }
 

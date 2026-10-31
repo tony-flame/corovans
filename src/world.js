@@ -32,6 +32,14 @@ export const ZONES = {
 export const SPAWN = { x: 12.5, y: 92.5 };
 export const MERCHANT_POS = { x: 20.5, y: 90.5 };
 export const COURTESAN_POS = { x: 26.5, y: 79.5 };
+
+// Четыре куртизанки в разных местах. Ключ места — то, чем запоминается дружба.
+export const COURTESAN_SPOTS_POS = {
+  square: { x: 26.5, y: 79.5 },
+  inn: { x: 60.5, y: 79.6 },
+  forest: { x: 46.5, y: 52.5 },
+  camp: { x: 95.5, y: 31.5 },
+};
 export const WAGON_BASE = { x: 102.4, y: 28.1 };
 
 let nextActorId = 1;
@@ -289,8 +297,26 @@ export function createWorld() {
     speed: 0,
     viewRange: 0,
     spriteKey: "courtesan",
+    spot: "square",
   });
   actors.push(courtesan);
+
+  // Остальные куртизанки: тот же вид, другие места.
+  const courtesans = [courtesan];
+  for (const spot of ["inn", "forest", "camp"]) {
+    const pos = COURTESAN_SPOTS_POS[spot];
+    if (!pos) continue;
+    const extra = makeActor("courtesan", pos.x, pos.y, {
+      hp: 9999,
+      maxHp: 9999,
+      speed: 0,
+      viewRange: 0,
+      spriteKey: "courtesan",
+      spot,
+    });
+    actors.push(extra);
+    courtesans.push(extra);
+  }
 
   const world = {
     map,
@@ -299,6 +325,8 @@ export function createWorld() {
     merchant,
     villageGuard,
     courtesan,
+    courtesans,
+    civilians: [],
     spawn: { ...SPAWN },
     wagon: { ...WAGON_BASE },
     tier: 1,
@@ -508,6 +536,15 @@ export function canStand(world, x, y, r, ignore = null) {
     const dy = y - animal.y;
     if (dx * dx + dy * dy < (r + animal.r) * (r + animal.r)) return false;
   }
+
+  // Гражданские блокируют, но их радиус меньше, чтобы не запирать проходы.
+  for (const person of world.civilians || []) {
+    if (!person.alive) continue;
+    const dx = x - person.x;
+    const dy = y - person.y;
+    const pr = (person.r || 0.3) * 0.85;
+    if (dx * dx + dy * dy < (r + pr) * (r + pr)) return false;
+  }
   return true;
 }
 
@@ -579,10 +616,36 @@ export function nearestInteraction(world, player) {
     const c = world.courtesan;
     candidates.push({
       type: "courtesan",
+      spot: c.spot || "square",
       x: c.x,
       y: c.y,
       radius: 2.2,
       label: `E — подойти к ${c.displayName || "куртизанке"}`,
+    });
+  }
+
+  // Остальные куртизанки: каждая отдельная цель со своим ключом места.
+  for (const c of world.courtesans || []) {
+    if (c === world.courtesan) continue;
+    candidates.push({
+      type: "courtesan",
+      spot: c.spot,
+      x: c.x,
+      y: c.y,
+      radius: 2.2,
+      label: `E — подойти к ${c.displayName || "куртизанке"}`,
+    });
+  }
+
+  // Гражданские: с ними можно поговорить.
+  for (const c of world.civilians || []) {
+    candidates.push({
+      type: "civilian",
+      civilianId: c.id,
+      x: c.x,
+      y: c.y,
+      radius: 1.9,
+      label: `E — заговорить (${c.label})`,
     });
   }
 

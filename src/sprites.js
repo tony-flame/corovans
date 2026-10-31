@@ -173,6 +173,136 @@ export function buildSprites() {
     // Заглушка: настоящий спрайт подставляется из buildCourtesan() по варианту.
     courtesan: make(48, 92, () => {}),
 
+    // ── Гражданские: фон мира ──
+
+    peasant_w: make(48, 84, (ctx) => {
+      // длинная юбка и платок
+      ctx.fillStyle = "#5a4a38";
+      ctx.beginPath();
+      ctx.moveTo(24, 38);
+      ctx.lineTo(38, 82);
+      ctx.lineTo(10, 82);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 20, 34, 8, 22, "#6b5a44");
+      rect(ctx, 14, 40, 5, 16, "#c9a882");
+      rect(ctx, 29, 40, 5, 16, "#c9a882");
+      ellipse(ctx, 24, 26, 8, 9, "#d8b894");
+      ctx.fillStyle = "#8a3a3a";
+      ctx.beginPath();
+      ctx.moveTo(15, 24);
+      ctx.quadraticCurveTo(24, 12, 33, 24);
+      ctx.lineTo(33, 28);
+      ctx.lineTo(15, 28);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 21, 26, 2, 2, "#2a1d16");
+      rect(ctx, 26, 26, 2, 2, "#2a1d16");
+    }),
+
+    peasant_m: make(48, 84, (ctx) => {
+      rect(ctx, 17, 68, 8, 14, "#3a2a1e");
+      rect(ctx, 25, 68, 8, 14, "#3a2a1e");
+      rect(ctx, 16, 36, 18, 32, "#6b5638");
+      rect(ctx, 20, 36, 3, 32, "#7d6644");
+      rect(ctx, 12, 40, 5, 18, "#c9a882");
+      rect(ctx, 33, 40, 5, 18, "#c9a882");
+      ellipse(ctx, 24, 26, 8, 9, "#c9a07a");
+      rect(ctx, 15, 18, 18, 6, "#4a3a28");
+      rect(ctx, 16, 24, 16, 2, "#3a2a1e");
+      rect(ctx, 21, 27, 2, 2, "#2a1d16");
+      rect(ctx, 26, 27, 2, 2, "#2a1d16");
+      // вилы
+      rect(ctx, 38, 30, 2, 46, "#5b4127");
+      rect(ctx, 35, 26, 8, 2, "#8a8578");
+    }),
+
+    greengrocer: make(50, 84, (ctx) => {
+      ctx.fillStyle = "#4a5a3a";
+      ctx.beginPath();
+      ctx.moveTo(24, 40);
+      ctx.lineTo(38, 82);
+      ctx.lineTo(10, 82);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 14, 46, 20, 4, "#8a7a4a");
+      ellipse(ctx, 24, 26, 8, 9, "#d8b894");
+      rect(ctx, 15, 18, 18, 7, "#c9a24a");
+      rect(ctx, 21, 28, 2, 2, "#2a1d16");
+      rect(ctx, 26, 28, 2, 2, "#2a1d16");
+      // корзина с зеленью
+      rect(ctx, 34, 60, 14, 12, "#8a6a3a");
+      ellipse(ctx, 38, 60, 4, 3, "#3d632d");
+      ellipse(ctx, 44, 60, 4, 3, "#547f38");
+    }),
+
+    drunk: make(48, 84, (ctx) => {
+      rect(ctx, 17, 70, 8, 12, "#2b2119");
+      rect(ctx, 25, 70, 8, 12, "#2b2119");
+      ctx.fillStyle = "#5a4a3a";
+      ctx.beginPath();
+      ctx.moveTo(24, 38);
+      ctx.lineTo(36, 76);
+      ctx.lineTo(12, 76);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 12, 44, 5, 16, "#c9a07a");
+      rect(ctx, 33, 44, 5, 16, "#c9a07a");
+      ellipse(ctx, 24, 27, 8, 9, "#c9a07a");
+      ellipse(ctx, 21, 27, 1.6, 1.6, "#6a2a2a");
+      ellipse(ctx, 27, 27, 1.6, 1.6, "#6a2a2a");
+      ctx.fillStyle = "#8a7d68";
+      ctx.beginPath();
+      ctx.moveTo(20, 32);
+      ctx.quadraticCurveTo(24, 38, 29, 32);
+      ctx.closePath();
+      ctx.fill();
+      // бутылка
+      rect(ctx, 38, 52, 5, 14, "#3a4a2a");
+      rect(ctx, 39, 46, 3, 7, "#3a4a2a");
+    }),
+
+    beggar: make(48, 80, (ctx) => {
+      ctx.fillStyle = "#4a4038";
+      ctx.beginPath();
+      ctx.moveTo(24, 44);
+      ctx.lineTo(36, 78);
+      ctx.lineTo(12, 78);
+      ctx.closePath();
+      ctx.fill();
+      // капюшон
+      ellipse(ctx, 24, 30, 10, 11, "#5a5048");
+      ellipse(ctx, 24, 32, 7, 8, "#8a7060");
+      rect(ctx, 21, 30, 2, 2, "#2a1d16");
+      rect(ctx, 26, 30, 2, 2, "#2a1d16");
+      rect(ctx, 12, 48, 5, 14, "#8a7060");
+      // чашка
+      ellipse(ctx, 38, 68, 5, 4, "#6b6357");
+    }),
+
+    traveler: make(48, 86, (ctx) => {
+      rect(ctx, 17, 72, 8, 12, "#3a2a1e");
+      rect(ctx, 25, 72, 8, 12, "#3a2a1e");
+      // плащ
+      ctx.fillStyle = "#3a4a5a";
+      ctx.beginPath();
+      ctx.moveTo(24, 30);
+      ctx.lineTo(38, 76);
+      ctx.lineTo(10, 76);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 12, 42, 5, 18, "#c9a882");
+      rect(ctx, 33, 42, 5, 18, "#c9a882");
+      ellipse(ctx, 24, 24, 8, 9, "#c9a07a");
+      rect(ctx, 14, 15, 20, 5, "#4a3a28");
+      rect(ctx, 16, 20, 16, 2, "#3a2a1e");
+      rect(ctx, 21, 25, 2, 2, "#2a1d16");
+      rect(ctx, 26, 25, 2, 2, "#2a1d16");
+      // посох и котомка
+      rect(ctx, 38, 34, 2, 44, "#5b4127");
+      ellipse(ctx, 12, 60, 6, 7, "#6b5a3a");
+    }),
+
     merchant: make(48, 84, (ctx) => {
       rect(ctx, 16, 72, 7, 10, "#2a2119");
       rect(ctx, 27, 72, 7, 10, "#2a2119");

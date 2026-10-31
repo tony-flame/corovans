@@ -8,7 +8,7 @@ import { createStyle } from "./style.js";
 import { canStand } from "./world.js";
 import { SAVE_VERSION } from "./profile.js";
 import { createBleed } from "./wildlife.js";
-import { OVERHEAL_CAP } from "./npc.js";
+import { OVERHEAL_CAP, createAffinity, COURTESAN_SPOTS } from "./npc.js";
 
 export const ACTS = [
   { index: 0, goal: 300, label: "Акт I", title: "Первая кровь или первая тень" },
@@ -74,6 +74,9 @@ export function createRun(seed, profile, options = {}) {
     // Сколько раз подходили к куртизанке: двигает слухи и не даёт
     // получать один и тот же слух бесконечно.
     visitIndex: 0,
+    // Привязанность по МЕСТУ, а не по варианту: друг остаётся другом,
+    // даже когда караван сменился и внешность стала другой.
+    courtesanAffinity: createAffinity(),
     player: { x: 0, y: 0, angle: 0, overheal: 0 },
   };
 
@@ -126,6 +129,7 @@ export function snapshotRun(run, player) {
     counters: { ...run.counters },
     player: { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 },
     visitIndex: run.visitIndex || 0,
+    courtesanAffinity: { ...(run.courtesanAffinity || {}) },
   };
 }
 
@@ -231,6 +235,13 @@ export function restoreRun(raw, profile, bonuses = null) {
 
   if (Number.isFinite(raw.visitIndex)) {
     run.visitIndex = Math.max(0, Math.floor(raw.visitIndex));
+  }
+
+  if (raw.courtesanAffinity && typeof raw.courtesanAffinity === "object") {
+    for (const spot of COURTESAN_SPOTS) {
+      const value = raw.courtesanAffinity[spot];
+      if (Number.isFinite(value)) run.courtesanAffinity[spot] = Math.max(0, Math.floor(value));
+    }
   }
 
   return { run, repaired };

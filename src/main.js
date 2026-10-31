@@ -52,11 +52,23 @@ import {
   courtesanRumor,
   absorbWithOverheal,
   OVERHEAL_CAP,
+  affinityOf,
+  isFreeVisit,
+  bumpAffinity,
 } from "./npc.js";
+import {
+  createCivilians,
+  stepCivilian,
+  civilianLine,
+  bumpVisits,
+  isTrader,
+  isBeggar,
+  isRumormonger,
+} from "./civilian.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-10-31-courtesan-1";
+const BUILD = "2026-10-31-population-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
@@ -172,6 +184,10 @@ function syncRunToWorld() {
 // новый тир и акт дают новую внешность и новые тушки.
 function respawnWildlifeAndCourtesan() {
   world.animals = spawnAnimals(run.tier, world.archetype);
+  // Гражданские не пересоздаются с караваном: они часть мира, не лагеря.
+  if (!world.civilians || world.civilians.length === 0) {
+    world.civilians = createCivilians(run.seed);
+  }
   updateCourtesanVariant();
 }
 
@@ -200,17 +216,18 @@ const ANIMAL_SPOTS = [
   { x: 88, y: 62 }, { x: 94, y: 70 },
 ];
 
+// Каждая куртизанка получает свой вариант: сид включает ключ места.
 function updateCourtesanVariant() {
-  const courtesan = world.courtesan;
-  if (!courtesan) return;
+  for (const courtesan of world.courtesans || []) {
+    const spot = courtesan.spot || "square";
+    const variant = createCourtesan(run.seed, run.tier, run.act, spot);
+    courtesan.displayName = variant.displayName;
+    courtesan.variant = variant;
+    courtesan.spriteKey = variant.spriteKey;
 
-  const variant = createCourtesan(run.seed, run.tier, run.act);
-  courtesan.displayName = variant.displayName;
-  courtesan.variant = variant;
-  courtesan.spriteKey = variant.spriteKey;
-
-  // Спрайт пересобирается под вариант: иначе цвет волос и платья не изменится.
-  renderer.sprites[variant.spriteKey] = buildCourtesan(variant);
+    // Спрайт пересобирается под вариант: иначе цвет волос и платья не изменится.
+    renderer.sprites[variant.spriteKey] = buildCourtesan(variant);
+  }
 }
 
 function saveCheckpoint(reason) {
@@ -511,7 +528,8 @@ function handleKeyDown(code) {
   if (code === "KeyE" && canControl()) {
     const near = nearestInteraction(world, player);
     if (near && near.type === "merchant") openTrade();
-    else if (near && near.type === "courtesan") visitCourtesan();
+    else if (near && near.type === "courtesan") visitCourtesan(near.spot);
+    else if (near && near.type === "civilian") talkToCivilian(near.civilianId);
     return;
   }
   if (code === "KeyF" && canControl()) {
@@ -543,13 +561,17 @@ function eatBestFood() {
 }
 
 // Куртизанка: открываем панель диалога, а не списываем деньги молча.
-function visitCourtesan() {
-  const courtesan = world.courtesan;
+// game.activeCourtesan помнит, к кому именно подошли: куртизанок теперь четыре.
+function visitCourtesan(spot) {
+  const courtesan = findCourtesan(spot);
   if (!courtesan || !courtesan.variant) return;
 
+  const key = courtesan.spot || "square";
   const variant = courtesan.variant;
-  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal);
+  const free = isFreeVisit(run.courtesanAffinity, key);
+  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal, free);
 
+  game.activeCourtesan = key;
   // При отказе всё равно показываем панель: так игрок видит, почему нельзя.
   game.courtesanRumorUsed = false;
 
@@ -563,58 +585,91 @@ function visitCourtesan() {
     temperLabel: variant.temperLabel,
     description: describeCourtesan(variant).replace(`${variant.displayName} (${variant.temperLabel}): `, ""),
     line: can.ok
-      ? greetCourtesan(variant, rng, { wanted: run.wanted, bled: run.bleed?.remaining || 0 })
+      ? greetCourtesan(variant, rng, {
+          wanted: run.wanted,
+          bled: run.bleed?.remaining || 0,
+          free,
+        })
       : refusalLine(variant, can.reason, rng),
-    info: can.ok
-      ? `Цена: ${variant.price} зм. · Здоровье ${Math.ceil(player.health)}/${player.maxHealth}` +
-        (player.overheal > 0.05 ? ` · запас +${Math.ceil(player.overheal)}` : "")
-      : can.reason === "full_health"
-        ? "Она смотрит на вас с сомнением: лечить нечего."
-        : `Не хватает ${variant.price - run.gold} зм.`,
+    info: can.ok ? courtesanInfo(variant, key, free) : courtesanRefusalInfo(variant, can.reason),
     price: variant.price,
     canPay: can.ok,
+    free,
+    affinity: affinityOf(run.courtesanAffinity, key),
     rumorUsed: false,
   });
   audio.ui();
 }
 
+function courtesanInfo(variant, spot, free) {
+  const health = `Здоровье ${Math.ceil(player.health)}/${player.maxHealth}` +
+    (player.overheal > 0.05 ? ` · запас +${Math.ceil(player.overheal)}` : "");
+  if (free) return `Бесплатно: она вас помнит. ${health}`;
+  const visits = affinityOf(run.courtesanAffinity, spot);
+  const left = Math.max(0, 2 - visits);
+  return `Цена: ${variant.price} зм. ${health}` +
+    (left > 0 && left < 2 ? ` · ещё ${left} платных визит(а) до «с тебя не беру»` : "");
+}
+
+function courtesanRefusalInfo(variant, reason) {
+  if (reason === "full_health") return "Она смотрит с сомнением: лечить нечего.";
+  return `Не хватает ${Math.max(0, variant.price - run.gold)} зм.`;
+}
+
+function findCourtesan(spot) {
+  if (spot) {
+    const found = (world.courtesans || []).find((c) => (c.spot || "square") === spot);
+    if (found) return found;
+  }
+  return world.courtesan;
+}
+
 function payCourtesan() {
-  const courtesan = world.courtesan;
+  const key = game.activeCourtesan || "square";
+  const courtesan = findCourtesan(key);
   if (!courtesan || !courtesan.variant) return;
 
   const variant = courtesan.variant;
-  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal);
+  const free = isFreeVisit(run.courtesanAffinity, key);
+  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal, free);
   if (!can.ok) {
     ui.setCourtesanLine(refusalLine(variant, can.reason, rng));
     return;
   }
 
-  const result = applyHeal(variant, run.gold, player.health, player.maxHealth, player.overheal);
+  const result = applyHeal(variant, run.gold, player.health, player.maxHealth, player.overheal, free);
   run.gold = result.gold;
   player.health = result.health;
   player.overheal = result.overheal;
+
+  // Платный визит повышает привязанность. Бесплатный — нет,
+  // иначе первый же бесплатный визит сделал бы её вечной.
+  if (!free) {
+    run.courtesanAffinity = bumpAffinity(run.courtesanAffinity, key);
+  }
 
   audio.coin();
   ui.setCourtesanLine(afterCourtesanLine(variant, rng));
 
   const parts = [];
   if (result.healed > 0) parts.push(`+${result.healed} здоровья`);
-  if (result.topped > 0) parts.push(`+${Math.round(result.topped)} запаса бодрости`);
-  if (parts.length) ui.message(`Отдых: ${parts.join(", ")} (−${variant.price} зм.).`);
+  if (result.topped > 0) parts.push(`+${Math.round(result.topped)} запаса`);
+  const priceText = free ? "бесплатно" : `−${variant.price} зм.`;
+  if (parts.length) ui.message(`Отдых: ${parts.join(", ")} (${priceText}).`);
 
   // Обновляем доступность: повторный визит может быть уже не нужен.
-  const again = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal);
+  const freeNow = isFreeVisit(run.courtesanAffinity, key);
+  const again = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal, freeNow);
   ui.openCourtesan({
     displayName: variant.displayName,
     temperLabel: variant.temperLabel,
     description: describeCourtesan(variant).replace(`${variant.displayName} (${variant.temperLabel}): `, ""),
     line: ui.$("courtesan-line").textContent,
-    info: again.ok
-      ? `Цена: ${variant.price} зм. · Здоровье ${Math.ceil(player.health)}/${player.maxHealth}` +
-        (player.overheal > 0.05 ? ` · запас +${Math.ceil(player.overheal)}` : "")
-      : "Больше она вам сегодня не поможет.",
+    info: again.ok ? courtesanInfo(variant, key, freeNow) : "Больше она вам сегодня не поможет.",
     price: variant.price,
     canPay: again.ok,
+    free: freeNow,
+    affinity: affinityOf(run.courtesanAffinity, key),
     rumorUsed: game.courtesanRumorUsed,
   });
 
@@ -622,7 +677,7 @@ function payCourtesan() {
 }
 
 function askCourtesan() {
-  const courtesan = world.courtesan;
+  const courtesan = findCourtesan(game.activeCourtesan);
   if (!courtesan || !courtesan.variant) return;
   if (game.courtesanRumorUsed) return;
 
@@ -639,7 +694,48 @@ function leaveCourtesan() {
   ui.closeCourtesan();
   game.uiOpen = false;
   game.courtesanRumorUsed = false;
+  game.activeCourtesan = null;
   input.requestLock();
+}
+
+// ── Гражданские ──────────────────────────────────────────────────────
+
+function talkToCivilian(civilianId) {
+  const person = (world.civilians || []).find((c) => c.id === civilianId);
+  if (!person) return;
+
+  bumpVisits(person);
+  const line = civilianLine(person, run.seed);
+
+  // Нищему можно подать: монета за репутацию.
+  if (isBeggar(person)) {
+    if (run.gold >= 1) {
+      run.gold -= 1;
+      profile = {
+        ...profile,
+        reputation: (profile.reputation || 0) + 1,
+        stats: { ...profile.stats },
+      };
+      ui.message(`${person.label}: ${line}`);
+      ui.message("Вы подали монету. +1 репутации.");
+      audio.coin();
+      saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+      return;
+    }
+    ui.message(`${person.label}: ${line}`);
+    ui.message("У вас нет даже монеты.");
+    return;
+  }
+
+  ui.message(`${person.label}: ${line}`);
+
+  if (isTrader(person)) {
+    ui.message("Она торгует едой. Спросите у Мардо — но у неё дешевле.");
+  } else if (isRumormonger(person)) {
+    ui.message("Он готов рассказать больше — за монету.");
+  }
+
+  audio.ui();
 }
 
 function handleKeyUp(code) {
@@ -1216,6 +1312,13 @@ function updateWildlife(dt) {
   }
 }
 
+// Гражданские: лёгкое блуждание по маршруту. Никакой агрессии.
+function updateCivilians(dt) {
+  for (const person of world.civilians || []) {
+    stepCivilian(person, dt);
+  }
+}
+
 function updateGame(dt) {
   game.time += dt;
   run.dayTime = (run.dayTime + dt) % 240;
@@ -1227,6 +1330,7 @@ function updateGame(dt) {
 
   // Живность и кровотечение тикают даже во время обыска.
   updateWildlife(dt);
+  updateCivilians(dt);
   tickBleed(dt);
 
   const mouse = input.consumeMouse();

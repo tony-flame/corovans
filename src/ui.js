@@ -249,7 +249,8 @@ export class UI {
 
     const payBtn = this.$("courtesan-pay");
     payBtn.disabled = !view.canPay;
-    payBtn.textContent = `Заплатить ${view.price} зм.`;
+    // Привязанность меняет не только цену, но и надпись на кнопке.
+    payBtn.textContent = view.free ? "Остаться (бесплатно)" : `Заплатить ${view.price} зм.`;
 
     const askBtn = this.$("courtesan-ask");
     askBtn.disabled = Boolean(view.rumorUsed);
