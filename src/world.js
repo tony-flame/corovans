@@ -327,6 +327,9 @@ export function createWorld() {
     courtesan,
     courtesans,
     civilians: [],
+    // Титан живёт отдельно от actors: spawnCamp его не трогает,
+    // а диспетчер врагов не принимает его за стражника.
+    titan: null,
     spawn: { ...SPAWN },
     wagon: { ...WAGON_BASE },
     tier: 1,
@@ -648,6 +651,17 @@ export function nearestInteraction(world, player) {
       y: c.y,
       radius: 1.9,
       label: `E — заговорить (${c.label})`,
+    });
+  }
+
+  // Титан: единственный, с кем можно договориться.
+  if (world.titan && world.titan.alive) {
+    candidates.push({
+      type: "titan",
+      x: world.titan.x,
+      y: world.titan.y,
+      radius: 3.2,
+      label: "E — заговорить с титаном",
     });
   }
 

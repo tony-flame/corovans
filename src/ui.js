@@ -364,6 +364,32 @@ export class UI {
     return !this.$("advice").classList.contains("hidden");
   }
 
+  // ── Титан ─────────────────────────────────────────────────────────
+
+  openTitan(view) {
+    this.$("titan").classList.remove("hidden");
+    this.$("titan-question").textContent = view.question;
+    this.$("titan-progress").textContent = view.progress;
+
+    const answers = this.$("titan-answers");
+    answers.innerHTML = "";
+    for (let i = 0; i < view.answers.length; i++) {
+      const btn = document.createElement("button");
+      btn.textContent = view.answers[i].text;
+      btn.dataset.answer = String(i);
+      btn.addEventListener("click", () => this.handlers.titanAnswer?.(i));
+      answers.appendChild(btn);
+    }
+  }
+
+  closeTitan() {
+    this.$("titan").classList.add("hidden");
+  }
+
+  get titanOpen() {
+    return !this.$("titan").classList.contains("hidden");
+  }
+
   openTrade(state) {
     this.tradeEl.classList.remove("hidden");
     this.renderTrade(state);

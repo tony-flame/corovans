@@ -495,11 +495,39 @@ button:disabled {
 
 /* ── Панель советов ── */
 
-#advice h3 { margin-top: 14px; }
-
-#advice-objective {
+#advice h3 { margin-top: 14px; }#advice-objective {
   font-size: 16px;
   color: #e8dfc8;
 }
 
 #advice-tips .item { justify-content: flex-start; }
+
+/* ── Титан ── */
+
+.titan-question {
+  font-size: 18px;
+  line-height: 1.5;
+  color: #e8dfc8;
+  font-style: italic;
+  margin: 12px 0 18px;
+}
+
+#titan-answers button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  font-size: 15px;
+}
+
+#titan-progress {
+  margin-top: 14px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+#titan .panel {
+  border-color: #7a2a22;
+  box-shadow: 0 0 0 1px #000, 0 20px 60px rgba(120, 20, 12, 0.5);
+}

@@ -401,6 +401,19 @@ export class Renderer {
       });
     }
 
+    // Титан: огромный, с собственным масштабом. Не цель, не сюжетный индикатор.
+    if (world.titan && world.titan.alive) {
+      list.push({
+        x: world.titan.x,
+        y: world.titan.y,
+        sprite: world.titan.spriteKey || "titan_calm",
+        scale: 2.4,
+        bob: world.titan.state === "hunt" ? 1 : 0,
+        alert: false,
+        actor: null,
+      });
+    }
+
     for (const item of list) {
       item.dist = (item.x - player.x) ** 2 + (item.y - player.y) ** 2;
     }

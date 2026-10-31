@@ -30,6 +30,17 @@ import { buildLightmap, AMBIENT } from "./lighting.js";
 import { createWeather, stepWeather, weatherLabel, isWet, setWeather } from "./weather.js";
 import { runCommand, CHEAT_HELP } from "./cheats.js";
 import { buildAdvicePanel } from "./advice.js";
+import {
+  createTitan,
+  stepTitan,
+  gatherPrey,
+  titanQuestions,
+  checkAnswer,
+  TITAN_FAIL_LINE,
+  TITAN_PASS_LINE,
+  TITAN_SCALE,
+} from "./titan.js";
+import { buildTitan } from "./titan-sprite.js";
 import { buildCourtesan } from "./sprites.js";
 import {
   SPECIES_DEFS,
@@ -70,7 +81,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-01-cheats-1";
+const BUILD = "2026-11-01-titan-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
@@ -123,6 +134,7 @@ function canControl() {
     !ui.lootOpen &&
     !ui.courtesanOpen &&
     !ui.adviceOpen &&
+    !ui.titanOpen &&
     !ui.consoleOpen
   );
 }
@@ -198,6 +210,28 @@ function respawnWildlifeAndCourtesan() {
     world.civilians = createCivilians(run.seed);
   }
   updateCourtesanVariant();
+  spawnTitan();
+}
+
+// Титан один на карту. Появляется у леса — далеко от деревни,
+// чтобы первые минуты забега не были смертельными.
+function spawnTitan() {
+  if (!run) return;
+  if (run.titanPacified) {
+    world.titan = null;
+    return;
+  }
+
+  if (!world.titan) {
+    world.titan = createTitan(run.seed, 40.5, 34.5);
+  }
+
+  // Спрайты собираются при загрузке, не в кадре.
+  renderer.sprites.titan_calm = buildTitan({ hunting: false });
+  renderer.sprites.titan_hunt = buildTitan({ hunting: true });
+  world.titan.spriteKey = world.titan.state === "hunt" || world.titan.state === "eat"
+    ? "titan_hunt"
+    : "titan_calm";
 }
 
 function spawnAnimals(tier, archetype) {
@@ -452,6 +486,7 @@ ui = new UI({
   courtesanLeave: leaveCourtesan,
   closeAdvice: closeAdvicePanel,
   consoleCommand: runConsoleCommand,
+  titanAnswer: answerTitan,
 });
 
 canvas.addEventListener("click", () => {
@@ -576,6 +611,7 @@ function handleKeyDown(code) {
     if (near && near.type === "merchant") openTrade();
     else if (near && near.type === "courtesan") visitCourtesan(near.spot);
     else if (near && near.type === "civilian") talkToCivilian(near.civilianId);
+    else if (near && near.type === "titan") startTitanDialogue();
     return;
   }
   if (code === "KeyF" && canControl()) {
@@ -879,8 +915,107 @@ function closeAdvicePanel() {
   input.requestLock();
 }
 
-function handleKeyUp(code) {
-  if (code === "KeyE") {
+// Смерть от титана: полный рестарт забега. Репутация и разблокировки целы.
+function titanDeath() {
+  if (game.gameOver) return;
+
+  player.dead = true;
+  game.gameOver = true;
+  input.exitLock();
+  ui.closeTrade();
+  ui.closeLoot();
+  ui.closeCourtesan();
+  ui.closeTitan();
+  ui.hideHelp();
+  game.uiOpen = false;
+  game.stealing = false;
+  game.stealProgress = 0;
+  ui.setPrompt(null);
+  ui.setProgress(null);
+  audio.death();
+
+  profile = { ...profile, stats: { ...profile.stats, deaths: (profile.stats.deaths || 0) + 1 } };
+  writeSave(profile, null);
+
+  ui.showEnd(
+    "Титан не оставил ничего",
+    "Ни имени, ни вещей, ни следа. Дорога начинается заново — но то, что ты знал, осталось с тобой. Репутация и разблокировки целы.",
+    false
+  );
+}
+
+// ── Диалог с титаном ─────────────────────────────────────────────────
+
+function startTitanDialogue() {
+  if (!world.titan || run.titanPacified) return;
+
+  game.titanDialogue = {
+    questions: titanQuestions(run.seed),
+    index: 0,
+    correct: 0,
+  };
+
+  game.uiOpen = true;
+  input.clear();
+  input.exitLock();
+  ui.setPrompt(null);
+  ui.setProgress(null);
+  showTitanQuestion();
+}
+
+function showTitanQuestion() {
+  const d = game.titanDialogue;
+  if (!d) return;
+
+  const q = d.questions[d.index];
+  if (!q) return;
+
+  ui.openTitan({
+    question: q.text,
+    answers: q.answers,
+    progress: `Вопрос ${d.index + 1} из ${d.questions.length}`,
+  });
+}
+
+function answerTitan(index) {
+  const d = game.titanDialogue;
+  if (!d) return;
+
+  const q = d.questions[d.index];
+  const correct = checkAnswer(q, index);
+
+  if (!correct) {
+    // Ошибся — он ест. Без вариантов.
+    ui.closeTitan();
+    game.titanDialogue = null;
+    game.uiOpen = false;
+    ui.message(TITAN_FAIL_LINE);
+    titanDeath();
+    return;
+  }
+
+  d.correct += 1;
+  d.index += 1;
+
+  if (d.index >= d.questions.length) {
+    // Прошёл все три.
+    run.titanPacified = true;
+    world.titan = null;
+    game.titanDialogue = null;
+    game.uiOpen = false;
+    ui.closeTitan();
+    ui.message(TITAN_PASS_LINE);
+    audio.victory();
+    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+    input.requestLock();
+    return;
+  }
+
+  audio.ui();
+  showTitanQuestion();
+}
+
+function handleKeyUp(code) {  if (code === "KeyE") {
     game.stealing = false;
     game.stealProgress = 0;
   }
@@ -1091,6 +1226,21 @@ function finishLoot() {
 
 function performAttack() {
   if (player.attackCd > 0 || player.dead || player.blocking) return;
+
+  // Титан неуязвим: удар просто отскакивает, но кулдаун тратится.
+  const titan = world.titan;
+  if (
+    titan &&
+    titan.alive &&
+    Math.hypot(titan.x - player.x, titan.y - player.y) < 2.6
+  ) {
+    player.attackCd = attackCooldown(run.upgrades.sword);
+    player.swingT = 0.34;
+    audio.swing();
+    audio.hit();
+    ui.message("Клинок отскакивает, будто от скалы. Его нельзя убить.");
+    return;
+  }
 
   player.attackCd = attackCooldown(run.upgrades.sword);
   player.swingT = 0.34;
@@ -1467,6 +1617,28 @@ function updateCivilians(dt) {
   }
 }
 
+// Титан: медленный, но неотступный. Ест всех, кроме Мардо и куртизанок.
+function updateTitan(dt) {
+  const titan = world.titan;
+  if (!titan) return;
+
+  const prey = gatherPrey(world, player);
+  const result = stepTitan(titan, prey, dt);
+  world.titan = result.titan;
+
+  if (result.ate && result.victim) {
+    if (result.victim.isPlayer) {
+      titanDeath();
+      return;
+    }
+    // NPC просто исчезает: он его съел.
+    result.victim.alive = false;
+    if (result.victim.kind) {
+      ui.message(`Титан съел ${result.victim.label || result.victim.kind}.`);
+    }
+  }
+}
+
 function updateGame(dt) {
   game.time += dt;
   run.dayTime = (run.dayTime + dt) % 240;
@@ -1479,6 +1651,7 @@ function updateGame(dt) {
   // Живность и кровотечение тикают даже во время обыска.
   updateWildlife(dt);
   updateCivilians(dt);
+  updateTitan(dt);
   tickBleed(dt);
 
   const mouse = input.consumeMouse();

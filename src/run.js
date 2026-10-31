@@ -77,6 +77,9 @@ export function createRun(seed, profile, options = {}) {
     // Привязанность по МЕСТУ, а не по варианту: друг остаётся другом,
     // даже когда караван сменился и внешность стала другой.
     courtesanAffinity: createAffinity(),
+    // Договорился с титаном — он больше не охотится. Хранится в сейве,
+    // иначе F5 переигрывал бы диалог.
+    titanPacified: false,
     player: { x: 0, y: 0, angle: 0, overheal: 0 },
   };
 
@@ -130,6 +133,7 @@ export function snapshotRun(run, player) {
     player: { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 },
     visitIndex: run.visitIndex || 0,
     courtesanAffinity: { ...(run.courtesanAffinity || {}) },
+    titanPacified: Boolean(run.titanPacified),
   };
 }
 
@@ -243,6 +247,8 @@ export function restoreRun(raw, profile, bonuses = null) {
       if (Number.isFinite(value)) run.courtesanAffinity[spot] = Math.max(0, Math.floor(value));
     }
   }
+
+  run.titanPacified = Boolean(raw.titanPacified);
 
   return { run, repaired };
 }
