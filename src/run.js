@@ -8,6 +8,7 @@ import { createStyle } from "./style.js";
 import { canStand } from "./world.js";
 import { SAVE_VERSION } from "./profile.js";
 import { createBleed } from "./wildlife.js";
+import { OVERHEAL_CAP } from "./npc.js";
 
 export const ACTS = [
   { index: 0, goal: 300, label: "Акт I", title: "Первая кровь или первая тень" },
@@ -70,7 +71,10 @@ export function createRun(seed, profile, options = {}) {
       acceptedAt: 0,
       totalGoldEarned: 0,
     },
-    player: { x: 0, y: 0, angle: 0 },
+    // Сколько раз подходили к куртизанке: двигает слухи и не даёт
+    // получать один и тот же слух бесконечно.
+    visitIndex: 0,
+    player: { x: 0, y: 0, angle: 0, overheal: 0 },
   };
 
   return run;
@@ -120,7 +124,8 @@ export function snapshotRun(run, player) {
     caravanTimer: run.caravanTimer,
     lootSoldForTier: run.lootSoldForTier,
     counters: { ...run.counters },
-    player: { x: player.x, y: player.y, angle: player.angle },
+    player: { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 },
+    visitIndex: run.visitIndex || 0,
   };
 }
 
@@ -217,9 +222,15 @@ export function restoreRun(raw, profile, bonuses = null) {
       x: raw.player.x,
       y: raw.player.y,
       angle: num(raw.player.angle, 0),
+      // Запас бодрости переживает перезагрузку, иначе F5 его сбрасывает.
+      overheal: Math.max(0, Math.min(OVERHEAL_CAP, num(raw.player.overheal, 0))),
     };
   } else {
     repaired = true;
+  }
+
+  if (Number.isFinite(raw.visitIndex)) {
+    run.visitIndex = Math.max(0, Math.floor(raw.visitIndex));
   }
 
   return { run, repaired };

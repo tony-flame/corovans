@@ -1,5 +1,5 @@
 // Куртизанка: платная услуга «отдохнуть и восстановиться» в духе Daggerfall.
-// Внешность и цена детерминированы от (runSeed, tier, act) — не хранятся в сейве.
+// Внешность, характер и цена детерминированы от (runSeed, tier, act) — не хранятся в сейве.
 // Чистый модуль.
 
 import { createRng, hashSeed } from "./rng.js";
@@ -43,36 +43,122 @@ export const ACCESSORIES = ["веер", "вуаль", "перья", "брошь"
 export const PRICE_MIN = 20;
 export const PRICE_MAX = 35;
 
-// Реплики. Имя подставляется, чтобы вариант ощущался живым.
-export const LINES = [
-  "{name} обмахивается веером: «Милый, ты выглядишь так, будто тебя били. Я это исправлю.»",
-  "{name} прищуривается: «Все бегут за золотом, а ты — ко мне. Приятно, когда ценят.»",
-  "{name} поправляет платье: «Дорога — грязное дело. Ты бы хоть пыль с сапог стряхнул.»",
-  "{name} вздыхает: «Очередной герой. Ладно, у меня сегодня хорошее настроение.»",
-  "{name} улыбается краешком губ: «Не благодари. Благодарность — не монета.»",
-  "{name} щёлкает веером: «Три акта, три каравана, а всё туда же. Мужчины не меняются.»",
-  "{name} оглядывает тебя с ног до головы: «Живой. Уже неплохо для этой дороги.»",
-  "{name} шепчет: «Только не говори Мардо. Он и так считает, что весь блеск в его сундуке.»",
-  "{name} усмехается: «За такие деньги я могла бы и не стараться. Но я стараюсь.»",
-  "{name} качает головой: «Раны затянутся, а вот манеры — вряд ли.»",
+// Максимальный запас бодрости сверх обычного здоровья.
+export const OVERHEAL_CAP = 25;
+// Сколько запаса тает в секунду на ходу.
+export const OVERHEAL_DECAY = 1;
+
+// Характеры: определяют тон реплик, цену и манеру.
+export const TEMPERS = {
+  mocking: { id: "mocking", label: "Насмешница", priceScale: 0.85 },
+  matron: { id: "matron", label: "Матрона", priceScale: 1.2 },
+  dreamer: { id: "dreamer", label: "Мечтательница", priceScale: 1.0 },
+  business: { id: "business", label: "Деловая", priceScale: 1.15 },
+  cryptic: { id: "cryptic", label: "Загадочная", priceScale: 1.05 },
+};
+
+export const TEMPER_ORDER = ["mocking", "matron", "dreamer", "business", "cryptic"];
+
+// Приветствия: зависят от характера. {name} подставляется.
+const GREETINGS = {
+  mocking: [
+    "{name} оглядывает тебя с ног до головы: «Живой. Уже достижение для этой дороги.»",
+    "{name} фыркает: «Ты выглядишь как человек, который спорил с дверью. И проиграл.»",
+    "{name} поднимает бровь: «О, снова герой. У меня как раз день терпения.»",
+  ],
+  matron: [
+    "{name} кивает на скамью: «Сядь. Не спорь. Я видела мужчин и похуже.»",
+    "{name} складывает руки: «Раны, грязь и гордость. Всё поправимо, кроме третьего.»",
+    "{name} вздыхает: «Ну что опять. Показывай, где болит.»",
+  ],
+  dreamer: [
+    "{name} смотрит не на тебя, а мимо: «Дорога у тебя в глазах. И пыль в волосах.»",
+    "{name} улыбается тихо: «Я ждала кого-нибудь. Не обязательно тебя, но ты подошёл.»",
+    "{name} касается твоего рукава: «Ты пахнешь дымом и чужим золотом.»",
+  ],
+  business: [
+    "{name} не отрывается от счётов: «Двадцать золотых. Раны залечу, сказки не рассказываю.»",
+    "{name} коротко кивает: «Живой, платёжеспособный. Проходи.»",
+    "{name} откладывает перо: «Время — деньги. Твоё здоровье — мои деньги.»",
+  ],
+  cryptic: [
+    "{name} улыбается одним углом рта: «Ты пришёл не за лечением. Но начнём с него.»",
+    "{name} смотрит сквозь тебя: «У всех на этой дороге что-то болит. У тебя — предсказуемо.»",
+    "{name} перебирает веер: «Судьба у тебя интересная. А вот состояние — нет.»",
+  ],
+};
+
+// Реакция на оплату.
+const AFTER_LINES = {
+  mocking: [
+    "{name} усмехается: «Не благодари. Благодарность — не монета.»",
+    "{name} щёлкает веером: «За такие деньги я могла бы и не стараться. Но я стараюсь.»",
+  ],
+  matron: [
+    "{name} кивает: «Иди. И не возвращайся слишком скоро — это выглядит жалко.»",
+    "{name} поправляет тебе воротник: «Хоть кто-то из вас уходит целым.»",
+  ],
+  dreamer: [
+    "{name} шепчет: «Возвращайся. Дорога длинная, а я никуда не денусь.»",
+    "{name} задерживает руку на мгновение дольше нужного: «Тепло тебе идёт.»",
+  ],
+  business: [
+    "{name} делает отметку в книге: «Следующий.»",
+    "{name} отсчитывает сдачу: «Всё по счёту. Приятно иметь дело.»",
+  ],
+  cryptic: [
+    "{name} говорит в спину: «В следующий раз ты придёшь не за этим.»",
+    "{name} качает головой: «Заплатил — и уже уходишь. Как все.»",
+  ],
+};
+
+// Отказы.
+const REFUSALS = {
+  full_health: [
+    "{name} отмахивается: «Тебе и так неплохо, милый.»",
+    "{name} оглядывает тебя: «Целёхонек. Иди работай.»",
+  ],
+  no_gold: [
+    "{name} поджимает губы: «Мило, но задаром я не работаю.»",
+    "{name} кивает на кошель: «Сначала монета, потом нежность.»",
+  ],
+};
+
+// Слухи: бесплатны, но полезны. Не просто украшение.
+const RUMORS = [
+  "Северный тракт перекрыли — стража там теперь чаще.",
+  "Мардо платит больше после заката. Не знаю почему. Знаю, что правда.",
+  "В лесу кто-то живёт. И это не дровосеки.",
+  "Караванщики стали нанимать больше охраны. Боятся.",
+  "У руин ночью видели свет. Днём там пусто.",
+  "Говорят, лисий мех теперь дороже человеческого. Времена.",
+  "В деревне не хватает рук: молодые ушли на тракт, не все вернулись.",
+  "Скупщик не любит, когда торгуются. Терпит, но запоминает.",
 ];
 
 export function courtesanSeed(runSeed, tier, act) {
   return hashSeed(`${runSeed}:${tier}:${act}:courtesan`);
 }
 
-// Вариант внешности. Меняется при смене каравана и при смене акта.
+function pickFrom(list, rng) {
+  return list[Math.floor(rng() * list.length) % list.length];
+}
+
+// Вариант внешности и характера. Меняется при смене каравана и акта.
 export function createCourtesan(runSeed, tier = 1, act = 0) {
   const seed = courtesanSeed(runSeed, tier, act);
   const rng = createRng(seed);
 
-  const name = NAMES[Math.floor(rng() * NAMES.length) % NAMES.length];
-  const epithet = EPITHETS[Math.floor(rng() * EPITHETS.length) % EPITHETS.length];
-  const hair = HAIR_COLORS[Math.floor(rng() * HAIR_COLORS.length) % HAIR_COLORS.length];
-  const dress = DRESS_COLORS[Math.floor(rng() * DRESS_COLORS.length) % DRESS_COLORS.length];
-  const accessory = ACCESSORIES[Math.floor(rng() * ACCESSORIES.length) % ACCESSORIES.length];
+  const name = pickFrom(NAMES, rng);
+  const epithet = pickFrom(EPITHETS, rng);
+  const hair = pickFrom(HAIR_COLORS, rng);
+  const dress = pickFrom(DRESS_COLORS, rng);
+  const accessory = pickFrom(ACCESSORIES, rng);
+  const temperId = pickFrom(TEMPER_ORDER, rng);
+  const temper = TEMPERS[temperId];
 
-  const price = PRICE_MIN + Math.floor(rng() * (PRICE_MAX - PRICE_MIN + 1));
+  const basePrice = PRICE_MIN + Math.floor(rng() * (PRICE_MAX - PRICE_MIN + 1));
+  const price = Math.max(PRICE_MIN, Math.min(PRICE_MAX, Math.round(basePrice * temper.priceScale)));
 
   const display = epithet ? `${epithet} ${name}` : name;
 
@@ -84,6 +170,8 @@ export function createCourtesan(runSeed, tier = 1, act = 0) {
     hair,
     dress,
     accessory,
+    temper: temperId,
+    temperLabel: temper.label,
     price,
     tier,
     act,
@@ -92,31 +180,107 @@ export function createCourtesan(runSeed, tier = 1, act = 0) {
   };
 }
 
-export function courtesanCanServe(courtesan, gold, health, maxHealth) {
+function fill(line, courtesan) {
+  return String(line).replace("{name}", courtesan.name);
+}
+
+export function greetCourtesan(courtesan, rng = Math.random, state = {}) {
+  if (!courtesan) return "";
+  const pool = GREETINGS[courtesan.temper] || GREETINGS.mock;
+  let line = fill(pickFrom(pool, rng), courtesan);
+
+  // Контекст важнее характера: за игроком охотятся — она это заметит.
+  if (state.wanted > 0) {
+    line = `${courtesan.name} понижает голос: «За тобой идут. Ладно, заходи быстрее.»`;
+  } else if (state.bled && state.bled > 0) {
+    line = `${courtesan.name} хмурится: «Ты кровью капаешь на мой пол. Заходи.»`;
+  }
+  return line;
+}
+
+export function afterCourtesanLine(courtesan, rng = Math.random) {
+  if (!courtesan) return "";
+  const pool = AFTER_LINES[courtesan.temper] || AFTER_LINES.mock;
+  return fill(pickFrom(pool, rng), courtesan);
+}
+
+export function refusalLine(courtesan, reason, rng = Math.random) {
+  if (!courtesan) return "";
+  const pool = REFUSALS[reason] || REFUSALS.full_health;
+  return fill(pickFrom(pool, rng), courtesan);
+}
+
+// Слух: одна строка, детерминированная от сида визита.
+export function courtesanRumor(runSeed, visitIndex = 0) {
+  const rng = createRng(hashSeed(`${runSeed}:rumor:${visitIndex}`));
+  return pickFrom(RUMORS, rng);
+}
+
+export function rumorCount() {
+  return RUMORS.length;
+}
+
+// Услуга доступна, пока есть куда лечиться или добирать бодрость.
+export function courtesanCanServe(courtesan, gold, health, maxHealth, overheal = 0) {
   if (!courtesan) return { ok: false, reason: "no_courtesan" };
-  if (health >= maxHealth) return { ok: false, reason: "full_health" };
+  const total = health + Math.max(0, overheal);
+  const ceiling = maxHealth + OVERHEAL_CAP;
+  if (total >= ceiling) return { ok: false, reason: "full_health" };
   if (gold < courtesan.price) return { ok: false, reason: "no_gold" };
   return { ok: true, reason: "" };
 }
 
-// Лечение с клампом по максимуму. Возвращает { health, gold, healed }.
-export function applyHeal(courtesan, gold, health, maxHealth) {
-  const healed = Math.min(maxHealth - health, maxHealth);
+// Лечение: сначала здоровье до максимума, остаток — в запас бодрости.
+// Возвращает { health, overheal, gold, healed, topped }.
+export function applyHeal(courtesan, gold, health, maxHealth, overheal = 0) {
+  const safeHealth = Math.max(0, Math.min(maxHealth, health));
+  const safeOver = Math.max(0, Math.min(OVERHEAL_CAP, overheal));
+  let room = maxHealth + OVERHEAL_CAP - (safeHealth + safeOver);
+
+  const healToMax = Math.min(room, maxHealth - safeHealth);
+  const newHealth = safeHealth + Math.max(0, healToMax);
+  room -= Math.max(0, healToMax);
+
+  const overGain = Math.min(room, OVERHEAL_CAP - safeOver);
+  const newOver = safeOver + Math.max(0, overGain);
+
   return {
-    health: Math.max(0, Math.min(maxHealth, health + healed)),
-    gold: Math.max(0, gold - courtesan.price),
-    healed,
+    health: newHealth,
+    overheal: newOver,
+    gold: Math.max(0, gold - (courtesan ? courtesan.price : 0)),
+    healed: newHealth - safeHealth,
+    topped: newOver - safeOver,
+  };
+}
+
+// Расход запаса на ходу. Возвращает остаток.
+export function decayOverheal(overheal, dt, moving) {
+  if (!moving || !Number.isFinite(overheal) || overheal <= 0) return Math.max(0, overheal || 0);
+  return Math.max(0, overheal - OVERHEAL_DECAY * dt);
+}
+
+// Урон: сначала съедает запас бодрости, потом здоровье.
+export function absorbWithOverheal(damage, health, overheal) {
+  const dmg = Math.max(0, damage);
+  const over = Math.max(0, overheal || 0);
+  const hp = Math.max(0, health);
+
+  const fromOver = Math.min(over, dmg);
+  const rest = dmg - fromOver;
+
+  return {
+    health: Math.max(0, hp - rest),
+    overheal: Math.max(0, over - fromOver),
+    absorbed: fromOver,
+    toHealth: rest,
   };
 }
 
 export function pickCourtesanLine(courtesan, rng = Math.random) {
-  if (!courtesan) return "";
-  const line = LINES[Math.floor(rng() * LINES.length) % LINES.length];
-  return line.replace("{name}", courtesan.name);
+  return greetCourtesan(courtesan, rng);
 }
 
-// Описание внешности — для подсказки и сообщений.
 export function describeCourtesan(courtesan) {
   if (!courtesan) return "";
-  return `${courtesan.displayName}: ${courtesan.hair.label} волосы, ${courtesan.dress.label} платье, ${courtesan.accessory}.`;
+  return `${courtesan.displayName} (${courtesan.temperLabel}): ${courtesan.hair.label} волосы, ${courtesan.dress.label} платье, ${courtesan.accessory}.`;
 }

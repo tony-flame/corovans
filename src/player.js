@@ -1,4 +1,5 @@
 import { moveActor } from "./world.js";
+import { OVERHEAL_DECAY } from "./npc.js";
 import {
   createJumpState,
   startJump,
@@ -28,6 +29,8 @@ export class Player {
 
     this.maxHealth = 100;
     this.health = 100;
+    // Запас бодрости сверх здоровья: даёт куртизанка, тает на ходу.
+    this.overheal = 0;
     this.maxStamina = 100;
     this.stamina = 100;
 
@@ -69,6 +72,7 @@ export class Player {
     this.setAngle(0);
     this.pitch = 0;
     this.health = this.maxHealth;
+    this.overheal = 0;
     this.stamina = this.maxStamina;
     this.dead = false;
     this.swingT = 0;
@@ -156,6 +160,13 @@ export class Player {
     } else {
       this.bobY *= Math.max(0, 1 - dt * 8);
       this.walkPhase += dt * 1.5;
+    }
+
+    // Запас бодрости тает только на ходу: в бою и на паузе он не сгорает,
+    // иначе награда исчезает раньше, чем успеваешь её использовать.
+    const moving = forward !== 0 || strafe !== 0;
+    if (this.overheal > 0 && moving) {
+      this.overheal = Math.max(0, this.overheal - OVERHEAL_DECAY * dt);
     }
   }
 }

@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## Project
 
@@ -25,7 +25,7 @@ ES modules require HTTP; `index.html` over `file://` fails. There is no browser 
 - `src/run.js` — run creation, snapshot/restore, `canCheckpoint`, acts, soft-death penalty. All save logic is testable here; `src/save.js` is the only module touching `localStorage`.
 - `src/world.js` — 120×120 tile map built in code, props, actors, collision, LOS, archetype layouts (`CAMP_LAYOUTS`), map zones (`ZONES`, `SPAWN`, `MERCHANT_POS`, `COURTESAN_POS`, `WAGON_BASE`). `makeActor()` is the single actor factory; `spawnCamp(world, tier, tuning)` rebuilds the camp. Map coordinates are code, not data. `hasPath()` does a tile flood-fill — use it before moving any building.
 - `src/wildlife.js` — cows/goats/foxes. **Animals live in `world.animals`, not `world.actors`.** `stepAnimal` is deterministic (no clocks, no `Math.random`); `animalOnHit` returns drops; `bleedTick`/`applyBleed` drive the damage-over-time.
-- `src/npc.js` — courtesan variant derived from `hashSeed(runSeed, tier, act)`. Never persisted: reloading and tier/act changes must reproduce the same look. `buildCourtesan(variant)` in `sprites.js` rebuilds the sprite.
+- `src/npc.js` — courtesan variant derived from `hashSeed(runSeed, tier, act)`. Never persisted: reloading and tier/act changes must reproduce the same look. `buildCourtesan(variant)` in `sprites.js` rebuilds the sprite. Temper (`mocking`/`matron`/`dreamer`/`business`/`cryptic`) drives greetings, price and refusals. **`applyHeal` fills health first, then `OVERHEAL_CAP` (25)** — the courtesan is useful at full HP, so don't reintroduce a "full health" refusal; only a full buffer blocks the visit.
 - `src/raycaster.js` — DDA walls, floor casting, billboards, weapon, suspicion bars, day/night shading. Fixed 640×360; the size is duplicated in `index.html` and `SCREEN_W/H`, and the FOV plane (0.66) lives in both `player.js` and `raycaster.js`. **Camera height and pitch are shear, not rotation:** `jumpZ` divides by depth (`(SCREEN_H*0.5 ± jumpZ)/perpDist` for walls, `/transformY` for sprites) — a constant offset on `drawStart` detaches walls from the floor. Pitch only shifts the horizon.
 - `src/ray.js` — pure single-ray DDA (`castRay`), tested in `tests/ray.test.js`. **A missed ray must return `dist = MAX_RAY_DIST`, never `0.05`.** The old inline version treated "no hit" as "wall in your face", which stretched a wall over the whole screen once the map grew past 80 tiles per ray. The step budget is derived from the map diagonal, not a magic number.
 - `src/dither.js` — Bayer dithering, deterministic grain, vignette, wall AO, murk tint. Pure. `DITHER_LEVELS = 16` with `ditherStrength = 0.28`; raising the strength turns the frame into visible dots (this happened once — screenshot before shipping).
@@ -48,6 +48,8 @@ ES modules require HTTP; `index.html` over `file://` fails. There is no browser 
 - `enemies.js:updateActors` dispatches **by explicit species**. There is no `else` fallback: an unknown kind is left alone. Adding an animal to `world.actors` would make it patrol and attack like a guard — keep animals in `world.animals`.
 - Killing an animal must **not** add wanted level or act style "kill"; only humans do that. `performAttack` skips `merchant` and `courtesan` — the courtesan must never be a valid target.
 - `run.bleed` is persisted in the snapshot. If you add a damage-over-time effect, add it to `snapshotRun`/`restoreRun` too, otherwise reloading heals it for free.
+- `player.overheal` (0..25) is also persisted via `run.player.overheal`. Damage goes through `absorbWithOverheal` in both `damagePlayer` and `applyBite`; it decays only while moving (`player.update`). If you add another damage path, route it through the same helper or the buffer stops protecting the player.
+- Any new overlay must be added to `canControl()` **and** to the `Escape` handler. The courtesan panel is the fifth overlay; forgetting it lets the player walk around inside a dialogue.
 - `run.wanted` comes from witnessed thefts and kills; the village guard turns hostile above 0. The merchant clears it for a fee.
 - **Checkpoints only block during an active steal.** Do not gate saving on `wanted` or an active chase: guards spot the player almost immediately after a theft, and the run would silently stop saving. Actor positions/HP are never persisted, so reloading cannot reroll a camp.
 - `die()` is a soft death: reload the checkpoint, then apply −20% gold and drop all carried loot, then write a new checkpoint **so the penalty can't be undone by reloading**.
@@ -57,7 +59,7 @@ ES modules require HTTP; `index.html` over `file://` fails. There is no browser 
 
 ## Verification
 
-`npm run verify` covers syntax plus 109 unit tests: RNG determinism, style caps, contract pass/fail per type, profile migration, save/restore, checkpoint rules, soft-death math (rounded up, so "20%" is not a lie), camp archetypes, day phases, jump physics, pitch clamping, block absorb, wildlife behaviour and drops, bleed ticks, courtesan variants, map reachability (flood-fill spawn → merchant → courtesan → wagon), ray geometry (no false hits, no screen-filling walls), dithering and lightmap math, weather determinism and ramps, map collision and LOS.
+`npm run verify` covers syntax plus 127 unit tests: RNG determinism, style caps, contract pass/fail per type, profile migration, save/restore, checkpoint rules, soft-death math (rounded up, so "20%" is not a lie), camp archetypes, day phases, jump physics, pitch clamping, block absorb, wildlife behaviour and drops, bleed ticks, courtesan variants, map reachability (flood-fill spawn → merchant → courtesan → wagon), ray geometry (no false hits, no screen-filling walls), dithering and lightmap math, weather determinism and ramps, courtesan tempers and overheal, map collision and LOS.
 
 `tests/logic.test.js` asserts exact map coordinates, guard counts (`tier + 1`) and HP formulas — changing the map or tier scaling means updating those assertions in the same commit.
 

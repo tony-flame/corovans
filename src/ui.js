@@ -30,6 +30,11 @@ export class UI {
     this.contractEl = this.$("contract");
     this.fameEl = this.$("fame");
 
+    this.overhealEl = this.$("overheal-bar");
+    this.overhealFill = this.$("overheal-fill");
+    this.overhealText = this.$("overheal-text");
+    this.courtesanEl = this.$("courtesan");
+
     this.startEl = this.$("start");
     this.pauseEl = this.$("pause");
     this.tradeEl = this.$("trade");
@@ -64,6 +69,9 @@ export class UI {
       if (btn) this.handlers.takeLoot?.(Number(btn.dataset.take));
     });
     this.$("loot-done").addEventListener("click", () => this.handlers.finishLoot?.());
+    this.$("courtesan-pay").addEventListener("click", () => this.handlers.courtesanPay?.());
+    this.$("courtesan-ask").addEventListener("click", () => this.handlers.courtesanAsk?.());
+    this.$("courtesan-leave").addEventListener("click", () => this.handlers.courtesanLeave?.());
 
     this.hitTimer = null;
     this.fameText = "";
@@ -84,6 +92,19 @@ export class UI {
     }
 
     this.goldEl.textContent = `${state.gold} зм.`;
+
+    // Запас бодрости: отдельная полоска, только когда он есть.
+    if (this.overhealEl) {
+      const over = Math.max(0, Math.min(25, p.overheal || 0));
+      if (over > 0.05) {
+        this.overhealEl.classList.remove("hidden");
+        this.overhealFill.style.width = `${(over / 25) * 100}%`;
+        this.overhealText.textContent = `+${Math.ceil(over)}`;
+      } else {
+        this.overhealEl.classList.add("hidden");
+      }
+    }
+
     if (this.repEl) this.repEl.textContent = `Репутация: ${state.reputation || 0}`;
     if (this.phaseEl) {
       const wet = state.wet && state.weatherLabel ? ` · ${state.weatherLabel}` : "";
@@ -211,6 +232,56 @@ export class UI {
 
   get helpOpen() {
     return !this.helpEl.classList.contains("hidden");
+  }
+
+  // ── Куртизанка ────────────────────────────────────────────────────
+
+  openCourtesan(view) {
+    this.courtesanEl.classList.remove("hidden");
+    this.$("courtesan-name").textContent = view.displayName;
+    this.$("courtesan-temper").textContent = `${view.temperLabel} · ${view.description}`;
+    this.$("courtesan-line").textContent = view.line;
+    this.$("courtesan-info").textContent = view.info;
+
+    const rumorEl = this.$("courtesan-rumor");
+    rumorEl.innerHTML = "";
+    rumorEl.classList.add("hidden");
+
+    const payBtn = this.$("courtesan-pay");
+    payBtn.disabled = !view.canPay;
+    payBtn.textContent = `Заплатить ${view.price} зм.`;
+
+    const askBtn = this.$("courtesan-ask");
+    askBtn.disabled = Boolean(view.rumorUsed);
+    askBtn.textContent = view.rumorUsed ? "Больше нечего сказать" : "Что слышно?";
+  }
+
+  showCourtesanRumor(text) {
+    const el = this.$("courtesan-rumor");
+    el.classList.remove("hidden");
+    el.innerHTML = "";
+    const row = document.createElement("div");
+    row.className = "item";
+    row.textContent = text;
+    el.appendChild(row);
+
+    // Слух выдаётся один раз за визит: кнопку гасим сразу,
+    // иначе её можно жать бесконечно и фармить подсказки.
+    const askBtn = this.$("courtesan-ask");
+    askBtn.disabled = true;
+    askBtn.textContent = "Больше нечего сказать";
+  }
+
+  setCourtesanLine(text) {
+    this.$("courtesan-line").textContent = text;
+  }
+
+  closeCourtesan() {
+    this.courtesanEl.classList.add("hidden");
+  }
+
+  get courtesanOpen() {
+    return !this.courtesanEl.classList.contains("hidden");
   }
 
   openTrade(state) {

@@ -14,6 +14,7 @@
     <div id="hud">
       <div id="vitals">
         <div class="bar"><div id="hp-fill" class="fill hp"></div><span id="hp-text">100 / 100</span></div>
+        <div id="overheal-bar" class="bar hidden"><div id="overheal-fill" class="fill over"></div><span id="overheal-text">+0</span></div>
         <div class="bar"><div id="st-fill" class="fill st"></div><span id="st-text">100</span></div>
         <div class="bar bar-noise"><div id="noise-fill" class="fill noise"></div><span id="noise-text">тихо</span></div>
         <div id="wanted" class="hidden"></div>
@@ -89,6 +90,21 @@
           <button id="sell-btn">Продать всё</button>
           <button id="fine-btn">Уладить с властями</button>
           <button id="close-trade">Уйти</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="courtesan" class="overlay hidden">
+      <div class="panel">
+        <h2 id="courtesan-name">Куртизанка</h2>
+        <p id="courtesan-temper" class="muted"></p>
+        <p id="courtesan-line"></p>
+        <div id="courtesan-info" class="trade-gold"></div>
+        <div id="courtesan-rumor" class="list hidden"></div>
+        <div class="row">
+          <button id="courtesan-pay">Заплатить</button>
+          <button id="courtesan-ask">Что слышно?</button>
+          <button id="courtesan-leave">Уйти</button>
         </div>
       </div>
     </div>

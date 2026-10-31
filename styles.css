@@ -72,6 +72,10 @@ body.playing #hud { opacity: 1; }
 }
 
 .fill.hp { background: linear-gradient(#b33a2e, #6d1c16); }
+.fill.over {
+  background: linear-gradient(#d8b25a, #8f7434);
+  transition: width 0.2s linear;
+}
 .fill.st { background: linear-gradient(#5f8f3a, #35551f); }
 .fill.noise { background: linear-gradient(#3f6a8f, #223d55); }
 

@@ -46,11 +46,17 @@ import {
   applyHeal,
   pickCourtesanLine,
   describeCourtesan,
+  greetCourtesan,
+  afterCourtesanLine,
+  refusalLine,
+  courtesanRumor,
+  absorbWithOverheal,
+  OVERHEAL_CAP,
 } from "./npc.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-10-30-fachwerk-1";
+const BUILD = "2026-10-31-courtesan-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
@@ -95,7 +101,8 @@ function canControl() {
     !game.victoryShown &&
     !ui.tradeOpen &&
     !ui.helpOpen &&
-    !ui.lootOpen
+    !ui.lootOpen &&
+    !ui.courtesanOpen
   );
 }
 
@@ -144,6 +151,8 @@ function continueRun() {
     player.x = run.player.x;
     player.y = run.player.y;
     player.setAngle(run.player.angle || 0);
+    // Запас бодрости восстанавливаем из сейва: иначе F5 его сбрасывает.
+    player.overheal = Math.max(0, Math.min(OVERHEAL_CAP, run.player.overheal || 0));
   } else {
     player.reset(world.spawn);
   }
@@ -209,7 +218,7 @@ function saveCheckpoint(reason) {
   if (!canCheckpoint(run, { stealing: game.stealing })) return false;
 
   run.rngState = rng.state();
-  run.player = { x: player.x, y: player.y, angle: player.angle };
+  run.player = { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 };
   return writeSave(profile, snapshotRun(run, player));
 }
 
@@ -399,6 +408,9 @@ ui = new UI({
   unlock: buyUnlock,
   takeLoot,
   finishLoot,
+  courtesanPay: payCourtesan,
+  courtesanAsk: askCourtesan,
+  courtesanLeave: leaveCourtesan,
 });
 
 canvas.addEventListener("click", () => {
@@ -478,7 +490,8 @@ function handleKeyDown(code) {
     return;
   }
   if (code === "Escape") {
-    if (ui.tradeOpen) closeTrade();
+    if (ui.courtesanOpen) leaveCourtesan();
+    else if (ui.tradeOpen) closeTrade();
     else if (ui.helpOpen) closeHelp();
     else if (ui.lootOpen) finishLoot();
     return;
@@ -529,28 +542,104 @@ function eatBestFood() {
   ui.message(`Вы съели ${food.name.toLowerCase()} (+${heal} здоровья).`);
 }
 
+// Куртизанка: открываем панель диалога, а не списываем деньги молча.
 function visitCourtesan() {
   const courtesan = world.courtesan;
   if (!courtesan || !courtesan.variant) return;
 
-  const can = courtesanCanServe(courtesan.variant, run.gold, player.health, player.maxHealth);
+  const variant = courtesan.variant;
+  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal);
+
+  // При отказе всё равно показываем панель: так игрок видит, почему нельзя.
+  game.courtesanRumorUsed = false;
+
+  game.uiOpen = true;
+  input.clear();
+  input.exitLock();
+  ui.setPrompt(null);
+  ui.setProgress(null);
+  ui.openCourtesan({
+    displayName: variant.displayName,
+    temperLabel: variant.temperLabel,
+    description: describeCourtesan(variant).replace(`${variant.displayName} (${variant.temperLabel}): `, ""),
+    line: can.ok
+      ? greetCourtesan(variant, rng, { wanted: run.wanted, bled: run.bleed?.remaining || 0 })
+      : refusalLine(variant, can.reason, rng),
+    info: can.ok
+      ? `Цена: ${variant.price} зм. · Здоровье ${Math.ceil(player.health)}/${player.maxHealth}` +
+        (player.overheal > 0.05 ? ` · запас +${Math.ceil(player.overheal)}` : "")
+      : can.reason === "full_health"
+        ? "Она смотрит на вас с сомнением: лечить нечего."
+        : `Не хватает ${variant.price - run.gold} зм.`,
+    price: variant.price,
+    canPay: can.ok,
+    rumorUsed: false,
+  });
+  audio.ui();
+}
+
+function payCourtesan() {
+  const courtesan = world.courtesan;
+  if (!courtesan || !courtesan.variant) return;
+
+  const variant = courtesan.variant;
+  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal);
   if (!can.ok) {
-    if (can.reason === "full_health") {
-      ui.message(`${courtesan.displayName}: «Тебе и так неплохо, милый.»`);
-    } else if (can.reason === "no_gold") {
-      ui.message(`${courtesan.displayName}: «Мило, но задаром я не работаю.»`);
-    }
+    ui.setCourtesanLine(refusalLine(variant, can.reason, rng));
     return;
   }
 
-  const result = applyHeal(courtesan.variant, run.gold, player.health, player.maxHealth);
+  const result = applyHeal(variant, run.gold, player.health, player.maxHealth, player.overheal);
   run.gold = result.gold;
   player.health = result.health;
+  player.overheal = result.overheal;
 
   audio.coin();
-  ui.message(pickCourtesanLine(courtesan.variant, rng));
-  ui.message(`Отдых восстановил ${result.healed} здоровья (−${courtesan.variant.price} зм.).`);
+  ui.setCourtesanLine(afterCourtesanLine(variant, rng));
+
+  const parts = [];
+  if (result.healed > 0) parts.push(`+${result.healed} здоровья`);
+  if (result.topped > 0) parts.push(`+${Math.round(result.topped)} запаса бодрости`);
+  if (parts.length) ui.message(`Отдых: ${parts.join(", ")} (−${variant.price} зм.).`);
+
+  // Обновляем доступность: повторный визит может быть уже не нужен.
+  const again = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal);
+  ui.openCourtesan({
+    displayName: variant.displayName,
+    temperLabel: variant.temperLabel,
+    description: describeCourtesan(variant).replace(`${variant.displayName} (${variant.temperLabel}): `, ""),
+    line: ui.$("courtesan-line").textContent,
+    info: again.ok
+      ? `Цена: ${variant.price} зм. · Здоровье ${Math.ceil(player.health)}/${player.maxHealth}` +
+        (player.overheal > 0.05 ? ` · запас +${Math.ceil(player.overheal)}` : "")
+      : "Больше она вам сегодня не поможет.",
+    price: variant.price,
+    canPay: again.ok,
+    rumorUsed: game.courtesanRumorUsed,
+  });
+
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+}
+
+function askCourtesan() {
+  const courtesan = world.courtesan;
+  if (!courtesan || !courtesan.variant) return;
+  if (game.courtesanRumorUsed) return;
+
+  game.courtesanRumorUsed = true;
+  const rumor = courtesanRumor(run.seed, run.visitIndex);
+  run.visitIndex = (run.visitIndex || 0) + 1;
+
+  ui.showCourtesanRumor(`«${rumor}»`);
+  audio.ui();
+  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+}
+
+function leaveCourtesan() {
+  ui.closeCourtesan();
+  game.uiOpen = false;
+  game.courtesanRumorUsed = false;
+  input.requestLock();
 }
 
 function handleKeyUp(code) {
@@ -960,7 +1049,10 @@ function damagePlayer(amount, source) {
   }
 
   const dmg = applyArmor(raw, run.upgrades.armor);
-  player.health = Math.max(0, player.health - dmg);
+  // Запас бодрости принимает удар первым, здоровье — остатком.
+  const absorbed = absorbWithOverheal(dmg, player.health, player.overheal);
+  player.health = absorbed.health;
+  player.overheal = absorbed.overheal;
   player.hurtFlash = 1;
   if (!player.blocking) audio.hurt();
   noteStyle("damage_taken");
@@ -1029,6 +1121,7 @@ function die() {
     player.x = run.player.x;
     player.y = run.player.y;
     player.setAngle(run.player.angle || 0);
+    player.overheal = Math.max(0, Math.min(OVERHEAL_CAP, run.player.overheal || 0));
   } else {
     player.reset(world.spawn);
   }
@@ -1061,7 +1154,9 @@ function applyBite(bite) {
   if (!bite || player.dead) return;
 
   const dmg = Math.max(1, Math.round(bite.damage));
-  player.health = Math.max(0, player.health - dmg);
+  const absorbed = absorbWithOverheal(dmg, player.health, player.overheal);
+  player.health = absorbed.health;
+  player.overheal = absorbed.overheal;
   player.hurtFlash = 1;
   run.bleed = applyBleed(run.bleed, bite.bleed);
   audio.hurt();

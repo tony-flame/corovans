@@ -318,10 +318,18 @@ test("npc: поля в кураторских палитрах, цена в ди
   }
 });
 
-test("npc: услуга недоступна при полном здоровье и без золота", () => {
+test("npc: услуга доступна при полном здоровье, пока есть место в запасе", () => {
   const c = createCourtesan(1, 1, 0);
 
-  assert.equal(courtesanCanServe(c, 100, 100, 100).reason, "full_health");
+  // Полное здоровье больше не отказ: куртизанка добирает запас бодрости.
+  assert.equal(courtesanCanServe(c, 100, 100, 100).ok, true);
+  assert.equal(courtesanCanServe(c, 100, 100, 100, 0).ok, true);
+
+  // Отказ только когда здоровье И запас на максимуме.
+  assert.equal(courtesanCanServe(c, 100, 100, 100, 25).reason, "full_health");
+  assert.equal(courtesanCanServe(c, 100, 100, 100, 24.9).ok, true);
+
+  // Без золота — отказ независимо от здоровья.
   assert.equal(courtesanCanServe(c, c.price - 1, 10, 100).reason, "no_gold");
   assert.equal(courtesanCanServe(c, c.price, 10, 100).ok, true);
   assert.equal(courtesanCanServe(null, 100, 10, 100).ok, false);
