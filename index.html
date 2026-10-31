@@ -34,7 +34,7 @@
       <div id="prompt"></div>
       <div id="progress" class="hidden"><div id="progress-fill"></div></div>
       <div id="messages"></div>
-      <div id="controls-hint">WASD — идти · Shift — бег · C — крадучись · Space — прыжок · E — действие · F — съесть · ЛКМ — удар · ПКМ — блок · I — помощь · Esc — пауза</div>
+      <div id="controls-hint">WASD — идти · Shift — бег · C — крадучись · Space — прыжок · E — действие · F — съесть · Tab — цели · ~ — консоль · ЛКМ — удар · ПКМ — блок · I — помощь · Esc — пауза</div>
     </div>
 
     <div id="start" class="overlay">
@@ -91,6 +91,33 @@
           <button id="fine-btn">Уладить с властями</button>
           <button id="close-trade">Уйти</button>
         </div>
+      </div>
+    </div>
+
+    <div id="advice" class="overlay hidden">
+      <div class="panel">
+        <h2>Цели и советы</h2>
+        <h3>Сейчас</h3>
+        <p id="advice-objective"></p>
+        <h3>Прогресс</h3>
+        <div id="advice-progress" class="trade-gold"></div>
+        <h3>Советы</h3>
+        <div id="advice-tips" class="list"></div>
+        <div class="row">
+          <button id="advice-close">Закрыть</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="console" class="overlay hidden">
+      <div class="panel console-panel">
+        <h2>Консоль <span class="console-note">режим разработчика</span></h2>
+        <div id="console-log" class="console-log"></div>
+        <form id="console-form" class="console-form">
+          <span class="console-prompt">&gt;</span>
+          <input id="console-input" type="text" autocomplete="off" spellcheck="false" placeholder="help — список команд">
+        </form>
+        <p class="console-hint">Введите <b>help</b> для списка. ↑ — история. Esc — закрыть.</p>
       </div>
     </div>
 

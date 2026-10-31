@@ -27,7 +27,9 @@ import {
 import { generateContracts, checkContract, rewardOf, contractName } from "./contracts.js";
 import { phaseOf, pricesAt } from "./daynight.js";
 import { buildLightmap, AMBIENT } from "./lighting.js";
-import { createWeather, stepWeather, weatherLabel, isWet } from "./weather.js";
+import { createWeather, stepWeather, weatherLabel, isWet, setWeather } from "./weather.js";
+import { runCommand, CHEAT_HELP } from "./cheats.js";
+import { buildAdvicePanel } from "./advice.js";
 import { buildCourtesan } from "./sprites.js";
 import {
   SPECIES_DEFS,
@@ -68,7 +70,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-10-31-population-1";
+const BUILD = "2026-11-01-cheats-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
@@ -92,6 +94,11 @@ const game = {
   noiseTimer: 0,
   noiseLevel: 0,
   weather: null,
+  godMode: false,
+  noclip: false,
+  speedMultiplier: 1,
+  consoleHistory: [],
+  consoleHistoryIndex: -1,
   time: 0,
   lastAlertMsg: -99,
   contractTimeLeft: null,
@@ -114,7 +121,9 @@ function canControl() {
     !ui.tradeOpen &&
     !ui.helpOpen &&
     !ui.lootOpen &&
-    !ui.courtesanOpen
+    !ui.courtesanOpen &&
+    !ui.adviceOpen &&
+    !ui.consoleOpen
   );
 }
 
@@ -217,16 +226,29 @@ const ANIMAL_SPOTS = [
 ];
 
 // Каждая куртизанка получает свой вариант: сид включает ключ места.
+// Спрайтов два на стиль: чистый и в крови. Переключаем ключ, а не пересобираем в кадре.
 function updateCourtesanVariant() {
+  const bloodied = (run.counters.kills > 0 && run.wanted > 0) || run.wanted >= 2;
+
   for (const courtesan of world.courtesans || []) {
     const spot = courtesan.spot || "square";
     const variant = createCourtesan(run.seed, run.tier, run.act, spot);
     courtesan.displayName = variant.displayName;
     courtesan.variant = variant;
-    courtesan.spriteKey = variant.spriteKey;
 
-    // Спрайт пересобирается под вариант: иначе цвет волос и платья не изменится.
-    renderer.sprites[variant.spriteKey] = buildCourtesan(variant);
+    const cleanKey = `${variant.spriteKey}_clean`;
+    const bloodKey = `${variant.spriteKey}_blood`;
+    courtesan.spriteKey = bloodied ? bloodKey : cleanKey;
+
+    // Старые ключи этого места удаляем, иначе копится мусор при каждом караване.
+    for (const key of Object.keys(renderer.sprites)) {
+      if (key.startsWith(`courtesan_`) && !key.endsWith("_clean") && !key.endsWith("_blood")) {
+        delete renderer.sprites[key];
+      }
+    }
+
+    renderer.sprites[cleanKey] = buildCourtesan(variant, { bloodied: false });
+    renderer.sprites[bloodKey] = buildCourtesan(variant, { bloodied: true });
   }
 }
 
@@ -428,6 +450,8 @@ ui = new UI({
   courtesanPay: payCourtesan,
   courtesanAsk: askCourtesan,
   courtesanLeave: leaveCourtesan,
+  closeAdvice: closeAdvicePanel,
+  consoleCommand: runConsoleCommand,
 });
 
 canvas.addEventListener("click", () => {
@@ -501,13 +525,35 @@ function resumeGame() {
 }
 
 function handleKeyDown(code) {
+  // Консоль перехватывает всё, пока открыта.
+  if (code === "Backquote") {
+    if (ui.consoleOpen) closeConsole();
+    else openConsole();
+    return;
+  }
+  if (code === "ArrowUp" && ui.consoleOpen) {
+    consoleHistory(-1);
+    return;
+  }
+  if (code === "ArrowDown" && ui.consoleOpen) {
+    consoleHistory(1);
+    return;
+  }
+  if (ui.consoleOpen) return;
+
   if (code === "KeyI" && game.started && !game.gameOver && !ui.tradeOpen) {
     if (ui.helpOpen) closeHelp();
     else openHelp();
     return;
   }
+  if (code === "Tab") {
+    if (ui.adviceOpen) closeAdvicePanel();
+    else openAdvicePanel();
+    return;
+  }
   if (code === "Escape") {
-    if (ui.courtesanOpen) leaveCourtesan();
+    if (ui.adviceOpen) closeAdvicePanel();
+    else if (ui.courtesanOpen) leaveCourtesan();
     else if (ui.tradeOpen) closeTrade();
     else if (ui.helpOpen) closeHelp();
     else if (ui.lootOpen) finishLoot();
@@ -736,6 +782,101 @@ function talkToCivilian(civilianId) {
   }
 
   audio.ui();
+}
+
+// ── Консоль разработчика ─────────────────────────────────────────────
+
+function openConsole() {
+  game.uiOpen = true;
+  input.clear();
+  input.exitLock();
+  ui.openConsole();
+  ui.consoleClear();
+  ui.consolePrint("Консоль разработчика. help — список команд.", "cmd");
+}
+
+function closeConsole() {
+  ui.closeConsole();
+  game.uiOpen = false;
+  input.requestLock();
+}
+
+function consoleHistory(direction) {
+  const history = game.consoleHistory;
+  if (!history.length) return;
+  const inputEl = ui.consoleInput();
+  let index = game.consoleHistoryIndex;
+  index += direction;
+  if (index < 0) index = 0;
+  if (index >= history.length) {
+    index = history.length - 1;
+    game.consoleHistoryIndex = index;
+    inputEl.value = "";
+    return;
+  }
+  game.consoleHistoryIndex = index;
+  inputEl.value = history[index];
+}
+
+function runConsoleCommand(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return;
+
+  game.consoleHistory.push(text);
+  game.consoleHistoryIndex = game.consoleHistory.length;
+  ui.consolePrint(`> ${text}`, "cmd");
+
+  const result = runCommand(text, cheatContext());
+  if (result.message) ui.consolePrint(result.message, result.ok ? "ok" : "err");
+  if (!result.ok && result.message === "") ui.consolePrint("Пустая команда.", "err");
+}
+
+function cheatContext() {
+  return {
+    game,
+    run,
+    player,
+    world,
+    profile,
+    setTier(value) {
+      run.tier = value;
+      spawnCamp(world, run.tier, tuningFor(run.style, run.tier + 1));
+      run.archetype = world.archetype;
+      respawnWildlifeAndCourtesan();
+    },
+    setAct(value) {
+      run.act = value;
+      refreshContracts();
+    },
+    setWeather(kind) {
+      if (!game.weather) game.weather = createWeather(run.seed);
+      setWeather(game.weather, kind);
+    },
+  };
+}
+
+// ── Панель целей и советов ───────────────────────────────────────────
+
+function openAdvicePanel() {
+  game.uiOpen = true;
+  input.clear();
+  input.exitLock();
+  ui.openAdvice(
+    buildAdvicePanel({
+      run,
+      world,
+      player,
+      game,
+      profile,
+    })
+  );
+  audio.ui();
+}
+
+function closeAdvicePanel() {
+  ui.closeAdvice();
+  game.uiOpen = false;
+  input.requestLock();
 }
 
 function handleKeyUp(code) {
@@ -1124,6 +1265,8 @@ function killActor(actor) {
 
 function damagePlayer(amount, source) {
   if (player.dead || game.gameOver) return;
+  // Режим разработчика: урон не проходит.
+  if (game.godMode) return;
 
   let raw = damageRoll(amount, rng);
 
@@ -1248,6 +1391,7 @@ game.damagePlayer = damagePlayer;
 // Укус лисы: урон + кровотечение, которое тикает само.
 function applyBite(bite) {
   if (!bite || player.dead) return;
+  if (game.godMode) return;
 
   const dmg = Math.max(1, Math.round(bite.damage));
   const absorbed = absorbWithOverheal(dmg, player.health, player.overheal);
@@ -1264,6 +1408,10 @@ function applyBite(bite) {
 // Кровотечение тикает независимо от боя.
 function tickBleed(dt) {
   if (!run.bleed || run.bleed.remaining <= 0) return;
+  if (game.godMode) {
+    run.bleed = { remaining: 0, dps: 0 };
+    return;
+  }
 
   const result = bleedTick(run.bleed, dt);
   run.bleed = result.bleed;
@@ -1362,6 +1510,9 @@ function updateGame(dt) {
   }
 
   if (!game.stealing) {
+    // Множитель скорости и noclip — только для режима разработчика.
+    run.speedMultiplier = game.speedMultiplier;
+    player.noclip = game.noclip;
     player.update(world, input, dt, run, audio);
   }
 

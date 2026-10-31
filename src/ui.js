@@ -72,6 +72,14 @@ export class UI {
     this.$("courtesan-pay").addEventListener("click", () => this.handlers.courtesanPay?.());
     this.$("courtesan-ask").addEventListener("click", () => this.handlers.courtesanAsk?.());
     this.$("courtesan-leave").addEventListener("click", () => this.handlers.courtesanLeave?.());
+    this.$("advice-close").addEventListener("click", () => this.handlers.closeAdvice?.());
+    this.$("console-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = this.$("console-input");
+      const value = input.value;
+      input.value = "";
+      this.handlers.consoleCommand?.(value);
+    });
 
     this.hitTimer = null;
     this.fameText = "";
@@ -283,6 +291,77 @@ export class UI {
 
   get courtesanOpen() {
     return !this.courtesanEl.classList.contains("hidden");
+  }
+
+  // ── Консоль разработчика ──────────────────────────────────────────
+
+  openConsole() {
+    this.$("console").classList.remove("hidden");
+    const input = this.$("console-input");
+    input.value = "";
+    setTimeout(() => input.focus(), 0);
+  }
+
+  closeConsole() {
+    this.$("console").classList.add("hidden");
+  }
+
+  get consoleOpen() {
+    return !this.$("console").classList.contains("hidden");
+  }
+
+  consolePrint(text, kind = "out") {
+    const log = this.$("console-log");
+    const line = document.createElement("div");
+    line.className = kind;
+    line.textContent = text;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+    // Историю не копим бесконечно.
+    while (log.children.length > 200) log.removeChild(log.firstChild);
+  }
+
+  consoleClear() {
+    this.$("console-log").innerHTML = "";
+  }
+
+  consoleFocus() {
+    this.$("console-input").focus();
+  }
+
+  consoleInput() {
+    return this.$("console-input");
+  }
+
+  // ── Панель целей и советов ────────────────────────────────────────
+
+  openAdvice(panel) {
+    this.$("advice").classList.remove("hidden");
+    this.$("advice-objective").textContent = panel.objective;
+    this.$("advice-progress").textContent =
+      `${panel.progress.current} / ${panel.progress.goal} зм. (${panel.progress.percent}%)` +
+      (panel.act ? ` · ${panel.act.label}` : "");
+
+    const tips = this.$("advice-tips");
+    tips.innerHTML = "";
+    if (!panel.tips.length) {
+      tips.innerHTML = '<div class="item empty">Советов нет — всё идёт как надо.</div>';
+    } else {
+      for (const tip of panel.tips) {
+        const row = document.createElement("div");
+        row.className = "item";
+        row.textContent = tip;
+        tips.appendChild(row);
+      }
+    }
+  }
+
+  closeAdvice() {
+    this.$("advice").classList.add("hidden");
+  }
+
+  get adviceOpen() {
+    return !this.$("advice").classList.contains("hidden");
   }
 
   openTrade(state) {

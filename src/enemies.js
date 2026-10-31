@@ -134,7 +134,8 @@ function updateGuard(game, actor, dt) {
     if (dist > 1.45) {
       moveToward(world, actor, player.x, player.y, actor.speed * 1.12, dt);
     } else if (actor.attackCd <= 0 && seen) {
-      actor.attackCd = 1.15;
+      // Пауза между ударами: 1.15 с давала слишком высокий DPS на первом тире.
+      actor.attackCd = 1.35;
       game.damagePlayer(actor.damage, actor);
     }
     return;

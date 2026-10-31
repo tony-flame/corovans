@@ -417,11 +417,13 @@ export function spawnCamp(world, tier, tuning = null) {
 
   for (let i = 0; i < guardCount; i++) {
     const [x, y] = campPoint(layout.guardSpots[i]);
-    const hp = Math.round((38 + tier * 14) * hpScale);
+    // Баланс: на первом тире двое стражей снимали ~63 HP и убивали новичка.
+    // 26 + tier*12 при тире 1 даёт 38 HP вместо 52.
+    const hp = Math.round((26 + tier * 12) * hpScale);
     const guard = makeActor("guard", x, y, {
       hp,
       maxHp: hp,
-      damage: Math.max(4, Math.round((7 + tier * 2) * damageScale)),
+      damage: Math.max(4, Math.round((5 + tier * 1.5) * damageScale)),
       speed: 2.0 + tier * 0.08,
       viewRange: (8 + tier * 0.4) * viewScale,
       angle: Math.PI / 2,
@@ -434,11 +436,11 @@ export function spawnCamp(world, tier, tuning = null) {
 
   for (const [ox, oy, opts] of layout.extra || []) {
     const [x, y] = campPoint([ox, oy]);
-    const hp = Math.round((30 + tier * 10) * hpScale);
+    const hp = Math.round((20 + tier * 9) * hpScale);
     const sleeper = makeActor("guard", x, y, {
       hp,
       maxHp: hp,
-      damage: Math.max(4, Math.round((6 + tier * 2) * damageScale)),
+      damage: Math.max(4, Math.round((4 + tier * 1.5) * damageScale)),
       speed: 2.0 + tier * 0.08,
       viewRange: (7 + tier * 0.4) * viewScale,
       angle: Math.PI / 2,

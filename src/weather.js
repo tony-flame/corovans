@@ -11,14 +11,16 @@ export const WEATHER = {
   DRIZZLE: "drizzle",
   RAIN: "rain",
   STORM: "storm",
+  SNOW: "snow",
 };
 
 // Доли вероятностей. Дождь должен быть заметным событием, а не фоном.
 const ODDS = [
-  { value: WEATHER.CLEAR, weight: 0.38 },
-  { value: WEATHER.DRIZZLE, weight: 0.27 },
-  { value: WEATHER.RAIN, weight: 0.25 },
-  { value: WEATHER.STORM, weight: 0.1 },
+  { value: WEATHER.CLEAR, weight: 0.34 },
+  { value: WEATHER.DRIZZLE, weight: 0.24 },
+  { value: WEATHER.RAIN, weight: 0.22 },
+  { value: WEATHER.STORM, weight: 0.09 },
+  { value: WEATHER.SNOW, weight: 0.11 },
 ];
 
 const INTENSITY = {
@@ -26,6 +28,7 @@ const INTENSITY = {
   drizzle: 0.35,
   rain: 0.7,
   storm: 1,
+  snow: 0.65,
 };
 
 const LABELS = {
@@ -33,7 +36,12 @@ const LABELS = {
   drizzle: "моросит",
   rain: "дождь",
   storm: "гроза",
+  snow: "снег",
 };
+
+export function isSnow(weather) {
+  return Boolean(weather && weather.kind === WEATHER.SNOW);
+}
 
 export function isWet(weather) {
   return Boolean(weather && weather.intensity > 0.01);
@@ -64,6 +72,7 @@ export function createWeather(runSeed) {
 
   return {
     kind,
+    targetKind: kind,
     intensity: base,
     target: base,
     wind,
@@ -79,14 +88,23 @@ export function stepWeather(weather, dt) {
   if (!weather) return weather;
 
   const target = weather.target !== undefined ? weather.target : weather.intensity;
-  const speed = 0.55;
+  // Переход заметно быстрее прежнего: за 1.5 секунды погода успевает смениться.
+  const speed = 1.4;
   if (Math.abs(weather.intensity - target) <= speed * dt) {
     weather.intensity = target;
   } else {
     weather.intensity += Math.sign(target - weather.intensity) * speed * dt;
   }
   weather.raining = weather.intensity > 0.01;
-  weather.kind = kindFromIntensity(weather.intensity);
+
+  // Снег сохраняется, пока цель — снег: иначе он превратится в «дождь»
+  // при первом же пересчёте по интенсивности. Проверка по targetKind,
+  // а не по intensity: снег может начаться с нуля и только набирать силу.
+  if (weather.targetKind === WEATHER.SNOW && weather.intensity > 0.001) {
+    weather.kind = WEATHER.SNOW;
+  } else {
+    weather.kind = kindFromIntensity(weather.intensity);
+  }
   return weather;
 }
 
@@ -97,20 +115,32 @@ export function kindFromIntensity(intensity) {
   return WEATHER.STORM;
 }
 
-// Смена погоды по ходу забега (если понадобится).
+// Смена погоды: цель и вид задаются сразу, чтобы UI не показывал
+// старую погоду, пока идёт плавный переход. Если игра на паузе
+// (например, открыта консоль), переход не тикает — поэтому ставим
+// и текущую интенсивность, иначе снег не появится до снятия паузы.
 export function setWeather(weather, kind) {
   if (!weather) return weather;
-  weather.target = INTENSITY[kind] !== undefined ? INTENSITY[kind] : 0;
+  const target = INTENSITY[kind] !== undefined ? INTENSITY[kind] : 0;
+  weather.target = target;
+  weather.targetKind = kind;
+  if (target > 0) {
+    weather.kind = kind;
+    weather.intensity = target;
+    weather.raining = true;
+  }
   return weather;
 }
 
 // Насколько темнее небо и плотнее туман.
 export function skyTint(weather) {
   const i = weather ? Math.max(0, Math.min(1, weather.intensity)) : 0;
+  const snow = isSnow(weather);
   return {
-    dim: 1 - i * 0.22,
-    fogBoost: 1 + i * 0.9,
-    grey: i * 0.35,
+    dim: 1 - i * (snow ? 0.14 : 0.22),
+    fogBoost: 1 + i * (snow ? 1.3 : 0.9),
+    grey: i * (snow ? 0.45 : 0.35),
+    cold: snow ? i : 0,
   };
 }
 
@@ -143,4 +173,29 @@ export function dropPosition(index, time, wind, screenWidth = 640, screenHeight 
 export function dropLength(weather, speedY) {
   const i = weather ? Math.max(0, Math.min(1, weather.intensity)) : 0;
   return 4 + i * 10 + speedY * 0.012;
+}
+
+// Снежинка: падает медленно и качается из стороны в сторону.
+// Отдельная функция, потому что физика совсем другая: не штрих, а точка.
+export function snowflakePosition(index, time, wind, screenWidth = 640, screenHeight = 360) {
+  const seed = (index * 2246822519) >>> 0;
+  const x0 = seed % screenWidth;
+  const speedY = 42 + ((seed >>> 8) % 46);
+  const speedX = wind * 46;
+  // Качание: у каждой снежинки своя фаза и амплитуда.
+  const swayPhase = ((seed >>> 12) % 628) / 100;
+  const swayAmp = 6 + ((seed >>> 20) % 14);
+
+  const y = (time * speedY + (seed >>> 16) % screenHeight) % (screenHeight + 40) - 40;
+  const sway = Math.sin(time * 1.6 + swayPhase) * swayAmp;
+  let x = (x0 + time * speedX + sway) % screenWidth;
+  if (x < 0) x += screenWidth;
+
+  return { x, y, speedY, sway };
+}
+
+// Сколько снежинок рисовать.
+export function snowflakeCount(weather, screenWidth = 640) {
+  const i = weather ? Math.max(0, Math.min(1, weather.intensity)) : 0;
+  return Math.round(screenWidth * 0.22 * i);
 }

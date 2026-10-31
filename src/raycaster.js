@@ -4,7 +4,7 @@ import { MAP_W, MAP_H, TILE } from "./world.js";
 import { castRay } from "./ray.js";
 import { quantize, murk, wallOcclusion, applyGrain, vignette } from "./dither.js";
 import { sampleLight } from "./lighting.js";
-import { dropCount, dropPosition, dropLength, skyTint } from "./weather.js";
+import { dropCount, dropPosition, dropLength, skyTint, snowflakePosition, snowflakeCount } from "./weather.js";
 
 const SCREEN_W = 640;
 const SCREEN_H = 360;
@@ -54,12 +54,18 @@ export class Renderer {
     }
   }
 
-  // Дождь: вертикальные штрихи, детерминированные от индекса капли и времени.
+  // Осадки: дождь штрихами, снег точками. Физика разная, поэтому ветки разные.
   drawRain(weather, time, horizon) {
     if (!weather || weather.intensity <= 0.01) return;
     const ctx = this.ctx;
-    const count = dropCount(weather, SCREEN_W);
     const tint = skyTint(weather);
+
+    if (tint.cold > 0.05) {
+      this.drawSnow(weather, time, tint);
+      return;
+    }
+
+    const count = dropCount(weather, SCREEN_W);
 
     ctx.save();
     ctx.strokeStyle = `rgba(190, 205, 215, ${0.18 + weather.intensity * 0.3})`;
@@ -84,6 +90,29 @@ export class Renderer {
       ctx.fillRect(0, Math.max(0, horizon - 40), SCREEN_W, 80);
       ctx.restore();
     }
+  }
+
+  drawSnow(weather, time, tint) {
+    const ctx = this.ctx;
+    const count = snowflakeCount(weather, SCREEN_W);
+    const i = weather.intensity;
+
+    ctx.save();
+    ctx.fillStyle = `rgba(226, 236, 245, ${0.35 + i * 0.45})`;
+
+    for (let k = 0; k < count; k++) {
+      const flake = snowflakePosition(k, time, weather.wind, SCREEN_W, SCREEN_H);
+      // Ближние снежинки крупнее: два размера вместо одного.
+      const size = k % 3 === 0 ? 2 : 1;
+      ctx.fillRect(flake.x, flake.y, size, size);
+    }
+    ctx.restore();
+
+    // Холодная дымка.
+    ctx.save();
+    ctx.fillStyle = `rgba(200, 214, 228, ${tint.cold * 0.16})`;
+    ctx.fillRect(0, Math.max(0, tint.dim * SCREEN_H * 0.2), SCREEN_W, SCREEN_H);
+    ctx.restore();
   }
 
   render(state) {
@@ -310,7 +339,9 @@ export class Renderer {
           x: actor.x,
           y: actor.y,
           sprite: actor.spriteKey || actor.kind,
-          scale: 0.94,
+          // Куртизанки нарисованы в 96×184 — им нужен свой масштаб,
+          // иначе при общем 0.94 они выходят мельче стражника.
+          scale: actor.kind === "courtesan" ? 1.18 : 0.94,
           bob: 0,
           alert: false,
           actor: null,

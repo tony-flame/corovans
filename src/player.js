@@ -127,7 +127,7 @@ export class Player {
 
     this.sprinting = wantsSprint && !this.crouching;
     const boots = state.upgrades.boots;
-    let speed = 2.35 * (1 + boots * 0.08);
+    const speedMultiplier = (state && state.speedMultiplier) || 1;    let speed = 2.35 * (1 + boots * 0.08) * speedMultiplier;
     if (this.crouching) speed *= 0.52;
     else if (this.sprinting) speed *= 1.62;
     if (this.blocking) speed *= BLOCK_SPEED_FACTOR;
@@ -147,7 +147,13 @@ export class Player {
       const len = Math.hypot(dx, dy);
       dx /= len;
       dy /= len;
-      moveActor(world, this, dx * speed * dt, dy * speed * dt, this.radius);
+      if (this.noclip) {
+        // Режим разработчика: двигаемся без проверки коллизий.
+        this.x += dx * speed * dt;
+        this.y += dy * speed * dt;
+      } else {
+        moveActor(world, this, dx * speed * dt, dy * speed * dt, this.radius);
+      }
 
       this.bobTime += dt * (this.sprinting ? 12 : this.crouching ? 5 : 8);
       this.bobY = Math.sin(this.bobTime) * (this.sprinting ? 2.4 : 1.5);
