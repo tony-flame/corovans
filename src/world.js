@@ -2,6 +2,8 @@
 // Мир строится зонами: деревня, тракт, поворот, стойбище, поля, лес, руины.
 // Координаты — код, не данные.
 
+import { createRng, hashSeed } from "./rng.js";
+
 export const TILE = {
   GRASS: 0,
   BRICK: 1,
@@ -298,29 +300,52 @@ export function createWorld() {
   // Живые изгороди вдоль улиц.
   for (let x = 20; x <= 34; x += 3) addProp("hedge", x, 100.5, 0.4, 0.7, true, false);
 
-  // ── Лес: настоящие деревья, а не дырки в траве ──
-  // Тропа идёт через лес к руинам, поэтому оставляем коридор x≈48-50.
+  // ── Лес: кластеры, а не сетка ──
+  // Сетка с равным шагом читалась как ряды. Теперь — пятна густоты
+  // с прогалинами между ними, детерминированно от сида.
+  const forestRng = createRng(hashSeed("forest"));
   const forestTrees = [];
-  for (let y = ZONES.FOREST.y0 + 1; y <= ZONES.FOREST.y1 - 1; y += 2.2) {
-    for (let x = ZONES.FOREST.x0 + 1; x <= ZONES.FOREST.x1 - 1; x += 2.4) {
-      // Коридор к руинам
-      if (x > 46 && x < 51) continue;
-      // Разрежение ближе к краю, чтобы лес не был стеной
-      const edge = Math.min(
-        x - ZONES.FOREST.x0,
-        ZONES.FOREST.x1 - x,
-        y - ZONES.FOREST.y0,
-        ZONES.FOREST.y1 - y
-      );
-      if (edge < 3 && (Math.round(x * 3 + y * 7) % 3 !== 0)) continue;
 
-      forestTrees.push([x + ((Math.round(y * 13) % 7) - 3) * 0.12, y]);
+  // 12 центров кластеров внутри зоны леса.
+  const clusters = [];
+  for (let i = 0; i < 12; i++) {
+    clusters.push({
+      x: ZONES.FOREST.x0 + 4 + forestRng() * (ZONES.FOREST.x1 - ZONES.FOREST.x0 - 8),
+      y: ZONES.FOREST.y0 + 4 + forestRng() * (ZONES.FOREST.y1 - ZONES.FOREST.y0 - 8),
+      r: 4 + forestRng() * 5,
+      density: 0.45 + forestRng() * 0.35,
+    });
+  }
+
+  for (let y = ZONES.FOREST.y0 + 1; y < ZONES.FOREST.y1; y += 0.9) {
+    for (let x = ZONES.FOREST.x0 + 1; x < ZONES.FOREST.x1; x += 0.9) {
+      // Коридор к руинам всегда чист.
+      if (x > 46 && x < 51) continue;
+
+      // Насколько точка близка к какому-то кластеру.
+      let best = 0;
+      for (const c of clusters) {
+        const d = Math.hypot(x - c.x, y - c.y);
+        if (d < c.r) {
+          const weight = (1 - d / c.r) * c.density;
+          if (weight > best) best = weight;
+        }
+      }
+
+      if (best <= 0) continue;
+      if (forestRng() > best * 1.6) continue;
+
+      forestTrees.push([
+        x + (forestRng() - 0.5) * 0.7,
+        y + (forestRng() - 0.5) * 0.7,
+        forestRng(),
+      ]);
     }
   }
-  for (let i = 0; i < forestTrees.length; i++) {
-    const [x, y] = forestTrees[i];
-    // Треть — ели, каждая седьмая — сухая.
-    const kind = i % 7 === 0 ? "deadTree" : i % 3 === 0 ? "pine" : "tree";
+
+  for (const [x, y, roll] of forestTrees) {
+    // Треть — ели, каждая седьмая — сухая: смешанный лес.
+    const kind = roll > 0.86 ? "deadTree" : roll > 0.42 ? "pine" : "tree";
     addProp(kind, x, y, kind === "pine" ? 0.42 : 0.36, kind === "pine" ? 1.45 : 1.4, true, true);
   }
 

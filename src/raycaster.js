@@ -13,6 +13,8 @@ const MAX_DIST = 40;
 
 // Уровней на канал: меньше — грубее и «аутентичнее», больше — чище.
 const DITHER_LEVELS = 16;
+// Доля высоты стены, занятая крышей-фронтоном.
+const ROOF_HEIGHT = 0.22;
 
 // Освещённость по фазам суток: множитель к цвету сцены.
 const LIGHT_LEVELS = { dawn: 0.82, day: 1, dusk: 0.72, night: 0.45 };
@@ -318,17 +320,45 @@ export class Renderer {
         const occlusion = wallOcclusion((y - wallTop) / span, 0.4);
         const shade = baseShade * occlusion * tileLight;
 
-        // Крыша: верхняя часть стены — тёмная кромка со свесом.
-        // Настоящей геометрии крыши в рейкастере нет, но тёмная полоса
-        // убирает ощущение «колодца» и читается как свес.
+        // ── Двускатная крыша ──
+        // Верхняя четверть стены — фронтон: черепица, конёк, свес.
+        // Вид сбоку читается как скат, потому что яркость зависит
+        // от расстояния до конька (texX ближе к центру — светлее).
         const roofT = (y - wallTop) / span;
-        const roofShade = roofT < 0.09 ? 0.28 : roofT < 0.13 ? 0.55 : 1;
-        const roofTint = roofT < 0.09 ? 0.55 : 1;
-        const finalShade = shade * roofShade;
+        let finalShade = shade;
+        let roofTint = 1;
+        let roofColor = null;
 
-        const sr = (c & 255) * finalShade * (1 - fogT) + fr * roofTint;
-        const sg = ((c >> 8) & 255) * finalShade * (1 - fogT) + fg * roofTint;
-        const sb = ((c >> 16) & 255) * finalShade * (1 - fogT) + fb * roofTint;
+        if (roofT < ROOF_HEIGHT) {
+          // Расстояние от конька: 0 в центре тайла, 1 у края.
+          const gable = Math.abs(ray.wallX - 0.5) * 2;
+          // Ряды черепицы: полосы по вертикали фронтона.
+          const tileRow = Math.floor(roofT * 18);
+          const tileBand = tileRow % 2 === 0 ? 1 : 0.86;
+          // Скат: чем ближе к коньку, тем светлее.
+          const slope = 0.55 + (1 - gable) * 0.45;
+          // Свес: нижняя кромка крыши темнее и отбрасывает тень на стену.
+          const eave = roofT > ROOF_HEIGHT - 0.02 ? 0.45 : 1;
+
+          finalShade = shade * slope * tileBand * eave * 1.15;
+          // Тёплая черепица поверх текстуры стены.
+          roofColor = [
+            116 * slope * tileBand,
+            74 * slope * tileBand,
+            48 * slope * tileBand,
+          ];
+          roofTint = 0.15;
+        }
+
+        const sr = roofColor
+          ? roofColor[0] * finalShade + fr * roofTint
+          : (c & 255) * finalShade * (1 - fogT) + fr;
+        const sg = roofColor
+          ? roofColor[1] * finalShade + fg * roofTint
+          : ((c >> 8) & 255) * finalShade * (1 - fogT) + fg;
+        const sb = roofColor
+          ? roofColor[2] * finalShade + fb * roofTint
+          : ((c >> 16) & 255) * finalShade * (1 - fogT) + fb;
 
         // Подмес мутного сумрака в тени и дизеринг каналов.
         const murked = murk(sr, sg, sb, 0.16);
