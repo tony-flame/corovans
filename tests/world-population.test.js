@@ -27,6 +27,7 @@ import {
   isBeggar,
   isRumormonger,
 } from "../src/civilian.js";
+import { PERSON_KINDS, PERSON_W, PERSON_H } from "../src/person.js";
 import {
   createWorld,
   canStand,
@@ -240,6 +241,16 @@ test("мир: у каждого гражданского есть спрайт",
   for (const person of world.civilians) {
     assert.ok(keys.has(person.spriteKey), `нет спрайта для ${person.kind}`);
   }
+});
+
+test("мир: у каждого вида гражданского есть большой спрайт в person.js", () => {
+  // Сторож на реальную регрессию: блок гражданских в sprites.js был снесён
+  // вместе с Мардо, и оба пропали молча — тесты этого не видели.
+  const missing = CIVILIAN_ORDER.filter((kind) => !PERSON_KINDS.includes(kind));
+  assert.deepEqual(missing, [], `в person.js нет спрайта для: ${missing.join(", ")}`);
+  assert.equal(PERSON_W, 96, "ширина спрайта человека");
+  assert.equal(PERSON_H, 184, "высота спрайта человека");
+  assert.ok(PERSON_KINDS.length >= CIVILIAN_ORDER.length);
 });
 
 test("мир: взаимодействие с гражданским определяется", () => {

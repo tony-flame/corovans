@@ -1,0 +1,32 @@
+function guard(ctx, tabard, trim) {
+  // копьё
+  rect(ctx, 9, 6, 2, 76, "#5b4127");
+  ctx.fillStyle = "#b8bcc4";
+  ctx.beginPath();
+  ctx.moveTo(10, 0);
+  ctx.lineTo(15, 12);
+  ctx.lineTo(5, 12);
+  ctx.closePath();
+  ctx.fill();
+  // сапоги и ноги
+  rect(ctx, 16, 68, 8, 14, "#2b2119");
+  rect(ctx, 28, 68, 8, 14, "#2b2119");
+  rect(ctx, 18, 56, 7, 14, "#4a3a2a");
+  rect(ctx, 27, 56, 7, 14, "#4a3a2a");
+  // туника
+  rect(ctx, 15, 32, 22, 28, tabard);
+  rect(ctx, 15, 32, 22, 3, trim);
+  rect(ctx, 24, 32, 4, 28, trim);
+  // руки
+  rect(ctx, 11, 36, 5, 18, "#7d5b3e");
+  rect(ctx, 36, 34, 5, 20, "#7d5b3e");
+  // голова и шлем
+  ellipse(ctx, 26, 24, 8, 9, "#b98d66");
+  rect(ctx, 17, 17, 18, 7, "#7d838f");
+  rect(ctx, 17, 22, 18, 3, "#565c68");
+  rect(ctx, 23, 25, 6, 9, "#565c68");
+  // ремень
+  rect(ctx, 15, 50, 22, 3, "#241a12");
+  rect(ctx, 23, 49, 5, 6, "#c9a24a");
+}
+

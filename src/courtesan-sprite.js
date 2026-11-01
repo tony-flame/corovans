@@ -30,7 +30,9 @@ function oval(ctx, x, y, rx, ry, color) {
 
 // Общая голова: кожа, глаза с радужкой и бликом, брови, нос, губы, румяна.
 // Возвращает точку, где заканчивается шея — для ожерелий.
-function head(ctx, opts) {
+// Экспортируется: гражданские в person.js рисуются той же головой,
+// иначе в одной сцене живут два несогласованных лица.
+export function head(ctx, opts) {
   const {
     skin = "#e8c4a8",
     skinShadow = "#c9a084",
@@ -39,6 +41,8 @@ function head(ctx, opts) {
     eyeColor = "#3a5a7a",
     hairstyle = "long",
     brow = "#4a3020",
+    beard = "none",
+    beardColor = null,
   } = opts;
 
   // Шея
@@ -99,11 +103,27 @@ function head(ctx, opts) {
   oval(ctx, 38, 33, 3, 2, "rgba(200,120,120,0.28)");
   oval(ctx, 58, 33, 3, 2, "rgba(200,120,120,0.28)");
 
+  // Борода: у мужчин лицо другое, иначе все выглядят как женщины.
+  if (beard === "full" || beard === "short") {
+    const bc = beardColor || hair;
+    // щёки и подбородок
+    oval(ctx, 48, 40, 11, 8, bc);
+    if (beard === "full") {
+      oval(ctx, 48, 44, 9, 10, bc);
+      px(ctx, 40, 38, 4, 8, bc);
+      px(ctx, 53, 38, 4, 8, bc);
+    }
+    // усы поверх губы
+    px(ctx, 43, 36, 11, 2, bc);
+    // губы снова видны между усами и бородой
+    px(ctx, 46, 38, 5, 2, "#9c4650");
+  }
+
   return { neckY: 54 };
 }
 
 // Кровь: пятна на щеке, шее, груди. Не для всех стилей.
-function blood(ctx) {
+export function blood(ctx) {
   const spots = [
     [58, 24, 2, 3],
     [61, 29, 1, 2],

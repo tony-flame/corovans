@@ -9,6 +9,9 @@ function make(w, h, draw) {
   return c;
 }
 
+// Гражданские приходят из person.js: они 96×184, как куртизанки.
+import { buildPeople } from "./person.js";
+
 function rect(ctx, x, y, w, h, color) {
   ctx.fillStyle = color;
   ctx.fillRect(x, y, w, h);
@@ -21,355 +24,206 @@ function ellipse(ctx, x, y, rx, ry, color) {
   ctx.fill();
 }
 
-// Куртизанки переехали в courtesan-sprite.js: четыре стиля по 96×184.
-export { buildCourtesan, courtesanStyleOf, SPOT_STYLE } from "./courtesan-sprite.js";
-
-function guard(ctx, tabard, trim) {
-  // копьё
-  rect(ctx, 9, 6, 2, 76, "#5b4127");
-  ctx.fillStyle = "#b8bcc4";
+function poly(ctx, points, color) {
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(10, 0);
-  ctx.lineTo(15, 12);
-  ctx.lineTo(5, 12);
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
   ctx.closePath();
   ctx.fill();
+}
+
+// Куртизанки переехали в courtesan-sprite.js: четыре стиля по 96×184.
+export { buildCourtesan, courtesanStyleOf, SPOT_STYLE } from "./courtesan-sprite.js";
+// Гражданские — в person.js, там же 96×184 и та же голова.
+export { buildPeople, buildPerson, PERSON_KINDS, PERSON_W, PERSON_H } from "./person.js";
+
+function guard(ctx, tabard, trim) {
+  const steel = "#7d838f";
+  const steelDark = "#565c68";
+  const skin = "#b98d66";
+
+  // копьё: от земли до наконечника над головой
+  rect(ctx, 24, 8, 4, 168, "#5b4127");
+  ctx.fillStyle = "#b8bcc4";
+  ctx.beginPath();
+  ctx.moveTo(26, 0);
+  ctx.lineTo(36, 26);
+  ctx.lineTo(16, 26);
+  ctx.closePath();
+  ctx.fill();
+  // перевязь наконечника
+  rect(ctx, 22, 26, 8, 4, "#8a9098");
+
   // сапоги и ноги
-  rect(ctx, 16, 68, 8, 14, "#2b2119");
-  rect(ctx, 28, 68, 8, 14, "#2b2119");
-  rect(ctx, 18, 56, 7, 14, "#4a3a2a");
-  rect(ctx, 27, 56, 7, 14, "#4a3a2a");
+  rect(ctx, 40, 148, 14, 34, "#2b2119");
+  rect(ctx, 56, 148, 14, 34, "#2b2119");
+  rect(ctx, 42, 176, 17, 8, "#1d1712");
+  rect(ctx, 53, 176, 17, 8, "#1d1712");
+  rect(ctx, 43, 118, 11, 34, "#4a3a2a");
+  rect(ctx, 56, 118, 11, 34, "#4a3a2a");
+
   // туника
-  rect(ctx, 15, 32, 22, 28, tabard);
-  rect(ctx, 15, 32, 22, 3, trim);
-  rect(ctx, 24, 32, 4, 28, trim);
+  rect(ctx, 38, 62, 34, 60, tabard);
+  // затемнение по краю — объём
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillRect(38, 62, 5, 60);
+  // отделка
+  rect(ctx, 38, 62, 34, 5, trim);
+  rect(ctx, 52, 62, 6, 60, trim);
+  // кольчуга на груди
+  rect(ctx, 40, 70, 30, 16, "#5a6068");
+  for (let i = 0; i < 4; i++) rect(ctx, 42 + i * 7, 72, 5, 1, "#7a808a");
+
   // руки
-  rect(ctx, 11, 36, 5, 18, "#7d5b3e");
-  rect(ctx, 36, 34, 5, 20, "#7d5b3e");
-  // голова и шлем
-  ellipse(ctx, 26, 24, 8, 9, "#b98d66");
-  rect(ctx, 17, 17, 18, 7, "#7d838f");
-  rect(ctx, 17, 22, 18, 3, "#565c68");
-  rect(ctx, 23, 25, 6, 9, "#565c68");
+  rect(ctx, 30, 66, 10, 42, tabard);
+  rect(ctx, 70, 64, 10, 44, tabard);
+  rect(ctx, 31, 104, 9, 12, skin);
+  rect(ctx, 70, 104, 9, 12, skin);
+
   // ремень
-  rect(ctx, 15, 50, 22, 3, "#241a12");
-  rect(ctx, 23, 49, 5, 6, "#c9a24a");
+  rect(ctx, 36, 112, 38, 7, "#241a12");
+  rect(ctx, 51, 110, 8, 11, "#c9a24a");
+
+  // голова и шлем
+  ellipse(ctx, 55, 46, 16, 17, skin);
+  rect(ctx, 37, 32, 36, 12, steel);
+  rect(ctx, 37, 42, 36, 5, steelDark);
+  // наносник
+  rect(ctx, 52, 42, 6, 18, steelDark);
+  // глаза под шлемом
+  rect(ctx, 44, 46, 4, 3, "#241a12");
+  rect(ctx, 62, 46, 4, 3, "#241a12");
+  // борода
+  ctx.fillStyle = "#4a3a28";
+  ctx.beginPath();
+  ctx.moveTo(45, 58);
+  ctx.quadraticCurveTo(55, 68, 65, 58);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Мардо-скупщик. Раньше жил внутри блока гражданских и был снесён
+// вместе с ними — вернул отдельной функцией.
+function merchantSprite(ctx) {
+  const robe = "#4c2a55";
+  const robeLight = "#7d4a88";
+  const skin = "#b98d66";
+
+  // сапоги
+  rect(ctx, 34, 150, 13, 32, "#2a2119");
+  rect(ctx, 51, 150, 13, 32, "#2a2119");
+  rect(ctx, 32, 176, 16, 8, "#1d1712");
+  rect(ctx, 51, 176, 16, 8, "#1d1712");
+
+  // балахон
+  poly(ctx, [[36, 58], [64, 58], [78, 184], [22, 184]], robe);
+  // тень по краю
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(22, 62, 8, 122);
+  // светлая полоса по центру
+  rect(ctx, 46, 62, 4, 122, robeLight);
+  // пояс с золотом
+  rect(ctx, 26, 128, 44, 8, "#c9a24a");
+  rect(ctx, 40, 126, 14, 12, "#8a6a2a");
+  ellipse(ctx, 47, 132, 5, 4, "#e0c45a");
+
+  // руки
+  rect(ctx, 24, 70, 12, 46, robe);
+  rect(ctx, 64, 70, 12, 44, robe);
+  ellipse(ctx, 30, 120, 6, 7, skin);
+  ellipse(ctx, 70, 118, 6, 7, skin);
+
+  // голова
+  ellipse(ctx, 50, 40, 16, 18, skin);
+  // борода
+  ctx.fillStyle = "#d7d0c2";
+  ctx.beginPath();
+  ctx.moveTo(38, 48);
+  ctx.quadraticCurveTo(50, 80, 62, 48);
+  ctx.closePath();
+  ctx.fill();
+  // глаза
+  rect(ctx, 42, 38, 4, 3, "#241a12");
+  rect(ctx, 56, 38, 4, 3, "#241a12");
+  // нос
+  rect(ctx, 49, 44, 3, 5, "#9c6f4c");
+  // шляпа с пером
+  ellipse(ctx, 50, 26, 26, 6, "#3a2142");
+  ellipse(ctx, 50, 14, 15, 12, "#3a2142");
+  rect(ctx, 44, 8, 12, 5, "#c9a24a");
+  poly(ctx, [[66, 4], [72, 22], [66, 20]], "#8a2a3a");
+
+  // кошель на боку
+  ellipse(ctx, 74, 96, 10, 13, "#6b4a26");
+  rect(ctx, 70, 84, 8, 5, "#c9a24a");
+  ellipse(ctx, 74, 100, 4, 4, "#c9a24a");
 }
 
 export function buildSprites() {
   return {
-    guard: make(48, 84, (ctx) => guard(ctx, "#2f4468", "#8f7434")),
-    village_guard: make(48, 84, (ctx) => guard(ctx, "#6d2b25", "#c9a24a")),
+    // Гражданские: 96×184 из person.js, ключи совпадают с spriteKey.
+    ...buildPeople(),
 
-    driver: make(48, 84, (ctx) => {
-      rect(ctx, 14, 70, 9, 12, "#2a2119");
-      rect(ctx, 27, 70, 9, 12, "#2a2119");
+    guard: make(96, 184, (ctx) => guard(ctx, "#2f4468", "#8f7434")),
+    village_guard: make(96, 184, (ctx) => guard(ctx, "#6d2b25", "#c9a24a")),
+    merchant: make(96, 184, (ctx) => merchantSprite(ctx)),
+
+    driver: make(96, 184, (ctx) => {
+      const cloak = "#6b5638";
+      const cloakDark = "#574529";
+
+      // сапоги
+      rect(ctx, 34, 148, 14, 34, "#2a2119");
+      rect(ctx, 52, 148, 14, 34, "#2a2119");
+      rect(ctx, 32, 176, 17, 8, "#1d1712");
+      rect(ctx, 51, 176, 17, 8, "#1d1712");
+
       // плащ
-      ctx.fillStyle = "#6b5638";
+      poly(ctx, [[36, 56], [66, 56], [80, 184], [20, 184]], cloak);
+      ctx.fillStyle = "rgba(0,0,0,0.2)";
+      ctx.fillRect(20, 60, 9, 122);
+      // подкладка и застёжка
+      rect(ctx, 47, 62, 4, 118, cloakDark);
+      ellipse(ctx, 49, 96, 7, 7, "#c9a24a");
+      ellipse(ctx, 49, 98, 4, 4, "#8a6a2a");
+
+      // руки
+      rect(ctx, 26, 72, 11, 44, cloak);
+      rect(ctx, 66, 70, 11, 44, cloak);
+      ellipse(ctx, 32, 120, 6, 7, "#a97f5b");
+      ellipse(ctx, 72, 118, 6, 7, "#a97f5b");
+
+      // капюшон
+      poly(ctx, [[32, 52], [68, 52], [64, 26], [50, 18], [36, 26]], "#5c4a2e");
+      ellipse(ctx, 50, 38, 16, 18, "#5c4a2e");
+      // лицо в тени капюшона
+      ellipse(ctx, 50, 42, 12, 14, "#a97f5b");
+      ellipse(ctx, 50, 38, 12, 10, "rgba(0,0,0,0.28)");
+      // глаза с бликом
+      rect(ctx, 43, 41, 4, 3, "#f0e8dc");
+      rect(ctx, 54, 41, 4, 3, "#f0e8dc");
+      rect(ctx, 44, 41, 2, 3, "#241a12");
+      rect(ctx, 56, 41, 2, 3, "#241a12");
+      // борода
+      ctx.fillStyle = "#4a3a28";
       ctx.beginPath();
-      ctx.moveTo(24, 22);
-      ctx.lineTo(42, 76);
-      ctx.lineTo(6, 76);
+      ctx.moveTo(40, 52);
+      ctx.quadraticCurveTo(50, 70, 62, 52);
       ctx.closePath();
       ctx.fill();
-      rect(ctx, 20, 46, 8, 4, "#3c2f1e");
-      // капюшон и лицо
-      ellipse(ctx, 24, 24, 10, 11, "#5c4a2e");
-      ellipse(ctx, 24, 26, 7, 8, "#a97f5b");
-      ellipse(ctx, 22, 25, 1.4, 1.4, "#241a12");
-      ellipse(ctx, 27, 25, 1.4, 1.4, "#241a12");
+
       // кнут
       ctx.strokeStyle = "#4b3520";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(38, 44);
-      ctx.quadraticCurveTo(46, 56, 40, 66);
+      ctx.moveTo(76, 96);
+      ctx.quadraticCurveTo(92, 128, 80, 160);
       ctx.stroke();
     }),
 
     // Заглушка: настоящий спрайт подставляется из buildCourtesan() по варианту.
     courtesan: make(48, 92, () => {}),
-
-    // ── Гражданские: фон мира ──
-
-    peasant_w: make(48, 84, (ctx) => {
-      // длинная юбка и платок
-      ctx.fillStyle = "#5a4a38";
-      ctx.beginPath();
-      ctx.moveTo(24, 38);
-      ctx.lineTo(38, 82);
-      ctx.lineTo(10, 82);
-      ctx.closePath();
-      ctx.fill();
-      rect(ctx, 20, 34, 8, 22, "#6b5a44");
-      rect(ctx, 14, 40, 5, 16, "#c9a882");
-      rect(ctx, 29, 40, 5, 16, "#c9a882");
-      ellipse(ctx, 24, 26, 8, 9, "#d8b894");
-      ctx.fillStyle = "#8a3a3a";
-      ctx.beginPath();
-      ctx.moveTo(15, 24);
-      ctx.quadraticCurveTo(24, 12, 33, 24);
-      ctx.lineTo(33, 28);
-      ctx.lineTo(15, 28);
-      ctx.closePath();
-      ctx.fill();
-      rect(ctx, 21, 26, 2, 2, "#2a1d16");
-      rect(ctx, 26, 26, 2, 2, "#2a1d16");
-    }),
-
-    peasant_m: make(48, 84, (ctx) => {
-      rect(ctx, 17, 68, 8, 14, "#3a2a1e");
-      rect(ctx, 25, 68, 8, 14, "#3a2a1e");
-      rect(ctx, 16, 36, 18, 32, "#6b5638");
-      rect(ctx, 20, 36, 3, 32, "#7d6644");
-      rect(ctx, 12, 40, 5, 18, "#c9a882");
-      rect(ctx, 33, 40, 5, 18, "#c9a882");
-      ellipse(ctx, 24, 26, 8, 9, "#c9a07a");
-      rect(ctx, 15, 18, 18, 6, "#4a3a28");
-      rect(ctx, 16, 24, 16, 2, "#3a2a1e");
-      rect(ctx, 21, 27, 2, 2, "#2a1d16");
-      rect(ctx, 26, 27, 2, 2, "#2a1d16");
-      // вилы
-      rect(ctx, 38, 30, 2, 46, "#5b4127");
-      rect(ctx, 35, 26, 8, 2, "#8a8578");
-    }),
-
-    greengrocer: make(50, 84, (ctx) => {
-      ctx.fillStyle = "#4a5a3a";
-      ctx.beginPath();
-      ctx.moveTo(24, 40);
-      ctx.lineTo(38, 82);
-      ctx.lineTo(10, 82);
-      ctx.closePath();
-      ctx.fill();
-      rect(ctx, 14, 46, 20, 4, "#8a7a4a");
-      ellipse(ctx, 24, 26, 8, 9, "#d8b894");
-      rect(ctx, 15, 18, 18, 7, "#c9a24a");
-      rect(ctx, 21, 28, 2, 2, "#2a1d16");
-      rect(ctx, 26, 28, 2, 2, "#2a1d16");
-      // корзина с зеленью
-      rect(ctx, 34, 60, 14, 12, "#8a6a3a");
-      ellipse(ctx, 38, 60, 4, 3, "#3d632d");
-      ellipse(ctx, 44, 60, 4, 3, "#547f38");
-    }),
-
-    drunk: make(48, 84, (ctx) => {
-      rect(ctx, 17, 70, 8, 12, "#2b2119");
-      rect(ctx, 25, 70, 8, 12, "#2b2119");
-      ctx.fillStyle = "#5a4a3a";
-      ctx.beginPath();
-      ctx.moveTo(24, 38);
-      ctx.lineTo(36, 76);
-      ctx.lineTo(12, 76);
-      ctx.closePath();
-      ctx.fill();
-      rect(ctx, 12, 44, 5, 16, "#c9a07a");
-      rect(ctx, 33, 44, 5, 16, "#c9a07a");
-      ellipse(ctx, 24, 27, 8, 9, "#c9a07a");
-      ellipse(ctx, 21, 27, 1.6, 1.6, "#6a2a2a");
-      ellipse(ctx, 27, 27, 1.6, 1.6, "#6a2a2a");
-      ctx.fillStyle = "#8a7d68";
-      ctx.beginPath();
-      ctx.moveTo(20, 32);
-      ctx.quadraticCurveTo(24, 38, 29, 32);
-      ctx.closePath();
-      ctx.fill();
-      // бутылка
-      rect(ctx, 38, 52, 5, 14, "#3a4a2a");
-      rect(ctx, 39, 46, 3, 7, "#3a4a2a");
-    }),
-
-    beggar: make(48, 80, (ctx) => {
-      ctx.fillStyle = "#4a4038";
-      ctx.beginPath();
-      ctx.moveTo(24, 44);
-      ctx.lineTo(36, 78);
-      ctx.lineTo(12, 78);
-      ctx.closePath();
-      ctx.fill();
-      // капюшон
-      ellipse(ctx, 24, 30, 10, 11, "#5a5048");
-      ellipse(ctx, 24, 32, 7, 8, "#8a7060");
-      rect(ctx, 21, 30, 2, 2, "#2a1d16");
-      rect(ctx, 26, 30, 2, 2, "#2a1d16");
-      rect(ctx, 12, 48, 5, 14, "#8a7060");
-      // чашка
-      ellipse(ctx, 38, 68, 5, 4, "#6b6357");
-    }),
-
-    traveler: make(48, 86, (ctx) => {
-      rect(ctx, 17, 72, 8, 12, "#3a2a1e");
-      rect(ctx, 25, 72, 8, 12, "#3a2a1e");
-      // плащ
-      ctx.fillStyle = "#3a4a5a";
-      ctx.beginPath();
-      ctx.moveTo(24, 30);
-      ctx.lineTo(38, 76);
-      ctx.lineTo(10, 76);
-      ctx.closePath();
-      ctx.fill();
-      rect(ctx, 12, 42, 5, 18, "#c9a882");
-      rect(ctx, 33, 42, 5, 18, "#c9a882");
-      ellipse(ctx, 24, 24, 8, 9, "#c9a07a");
-      rect(ctx, 14, 15, 20, 5, "#4a3a28");
-      rect(ctx, 16, 20, 16, 2, "#3a2a1e");
-      rect(ctx, 21, 25, 2, 2, "#2a1d16");
-      rect(ctx, 26, 25, 2, 2, "#2a1d16");
-      // посох и котомка
-      rect(ctx, 38, 34, 2, 44, "#5b4127");
-      ellipse(ctx, 12, 60, 6, 7, "#6b5a3a");
-    }),
-
-    merchant: make(48, 84, (ctx) => {
-      rect(ctx, 16, 72, 7, 10, "#2a2119");
-      rect(ctx, 27, 72, 7, 10, "#2a2119");
-      ctx.fillStyle = "#4c2a55";
-      ctx.beginPath();
-      ctx.moveTo(24, 20);
-      ctx.lineTo(42, 78);
-      ctx.lineTo(6, 78);
-      ctx.closePath();
-      ctx.fill();
-      rect(ctx, 24, 20, 2, 58, "#7d4a88");
-      rect(ctx, 10, 66, 28, 4, "#c9a24a");
-      ellipse(ctx, 24, 22, 8, 9, "#b98d66");
-      // борода
-      ctx.fillStyle = "#d7d0c2";
-      ctx.beginPath();
-      ctx.moveTo(18, 26);
-      ctx.quadraticCurveTo(24, 40, 30, 26);
-      ctx.closePath();
-      ctx.fill();
-      // шляпа
-      ellipse(ctx, 24, 15, 16, 4, "#3a2142");
-      ellipse(ctx, 24, 9, 8, 7, "#3a2142");
-      rect(ctx, 21, 6, 6, 3, "#c9a24a");
-      // кошель
-      ellipse(ctx, 38, 58, 5, 7, "#6b4a26");
-      rect(ctx, 36, 52, 4, 3, "#c9a24a");
-    }),
-
-    // ── Священник: тёмная ряса, посох, молитвенник ──
-    priest: make(48, 88, (ctx) => {
-      rect(ctx, 17, 74, 8, 12, "#1a1a1e");
-      rect(ctx, 25, 74, 8, 12, "#1a1a1e");
-      // ряса
-      ctx.fillStyle = "#241f2e";
-      ctx.beginPath();
-      ctx.moveTo(24, 26);
-      ctx.lineTo(38, 80);
-      ctx.lineTo(10, 80);
-      ctx.closePath();
-      ctx.fill();
-      // столы рясы — светлые полосы
-      rect(ctx, 16, 40, 16, 2, "#3a3348");
-      rect(ctx, 14, 58, 20, 2, "#3a3348");
-      // руки с молитвенником
-      rect(ctx, 12, 46, 5, 16, "#c9a882");
-      rect(ctx, 32, 46, 5, 16, "#c9a882");
-      rect(ctx, 18, 56, 13, 10, "#4a2028");
-      rect(ctx, 19, 57, 11, 8, "#d7cbb0");
-      rect(ctx, 24, 57, 1, 8, "#b8a888");
-      // голова
-      ellipse(ctx, 24, 22, 8, 9, "#c9a07a");
-      // тонзура
-      ellipse(ctx, 24, 15, 6, 5, "#c9a07a");
-      ellipse(ctx, 24, 14, 4, 3, "#b88f68");
-      // глаза
-      rect(ctx, 21, 23, 2, 2, "#2a1d16");
-      rect(ctx, 26, 23, 2, 2, "#2a1d16");
-      // посох с крестом
-      rect(ctx, 40, 30, 2, 56, "#5b4127");
-      rect(ctx, 37, 28, 8, 2, "#8a6a3a");
-      rect(ctx, 39, 22, 2, 8, "#c9a24a");
-      // чётки
-      ellipse(ctx, 13, 48, 4, 4, "#3a3348");
-    }),
-
-    // ── Рыночный торговец: фартук, лоток, монеты ──
-    market_trader: make(50, 86, (ctx) => {
-      rect(ctx, 15, 76, 8, 10, "#3a2a1e");
-      rect(ctx, 27, 76, 8, 10, "#3a2a1e");
-      // кафтан
-      ctx.fillStyle = "#6a4a26";
-      ctx.beginPath();
-      ctx.moveTo(25, 28);
-      ctx.lineTo(39, 78);
-      ctx.lineTo(11, 78);
-      ctx.closePath();
-      ctx.fill();
-      // фартук
-      rect(ctx, 17, 46, 16, 30, "#a08a62");
-      rect(ctx, 17, 46, 16, 2, "#8a7450");
-      // руки
-      rect(ctx, 11, 46, 5, 16, "#c9a882");
-      rect(ctx, 34, 46, 5, 16, "#c9a882");
-      // голова
-      ellipse(ctx, 25, 22, 8, 9, "#c9a07a");
-      rect(ctx, 22, 23, 2, 2, "#2a1d16");
-      rect(ctx, 28, 23, 2, 2, "#2a1d16");
-      // усы
-      rect(ctx, 21, 27, 9, 2, "#3a2a1e");
-      // шапка
-      rect(ctx, 16, 13, 18, 6, "#3a2a1e");
-      rect(ctx, 14, 17, 22, 3, "#4a3626");
-      // монета в руке
-      ellipse(ctx, 36, 62, 3, 3, "#c9a24a");
-    }),
-
-    // ── Стражник ратуши: кираса, алебарда, тяжёлый плащ ──
-    throne_guard: make(52, 92, (ctx) => {
-      rect(ctx, 17, 78, 8, 12, "#22242a");
-      rect(ctx, 27, 78, 8, 12, "#22242a");
-      // плащ
-      ctx.fillStyle = "#2a1e2e";
-      ctx.beginPath();
-      ctx.moveTo(26, 26);
-      ctx.lineTo(44, 82);
-      ctx.lineTo(8, 82);
-      ctx.closePath();
-      ctx.fill();
-      // кираса
-      rect(ctx, 15, 34, 22, 26, "#5a6068");
-      rect(ctx, 15, 34, 22, 3, "#767c86");
-      rect(ctx, 18, 40, 16, 2, "#767c86");
-      rect(ctx, 18, 50, 16, 2, "#767c86");
-      // наплечники
-      ellipse(ctx, 14, 36, 7, 6, "#6a7078");
-      ellipse(ctx, 38, 36, 7, 6, "#6a7078");
-      // руки
-      rect(ctx, 10, 40, 5, 20, "#5a6068");
-      rect(ctx, 37, 40, 5, 20, "#5a6068");
-      // шлем
-      ellipse(ctx, 26, 20, 9, 10, "#6a7078");
-      rect(ctx, 17, 20, 18, 6, "#7a808a");
-      rect(ctx, 22, 22, 8, 2, "#1a1c20");
-      // плюмаж
-      rect(ctx, 25, 6, 3, 8, "#7a1f1f");
-      // алебарда
-      rect(ctx, 44, 12, 3, 76, "#4a3a26");
-      ctx.strokeStyle = "#8a9098";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(45, 12);
-      ctx.lineTo(45, 32);
-      ctx.stroke();
-      ctx.fillStyle = "#9aa0a8";
-      ctx.beginPath();
-      ctx.moveTo(45, 12);
-      ctx.lineTo(52, 20);
-      ctx.lineTo(45, 28);
-      ctx.closePath();
-      ctx.fill();
-      // наконечник снизу
-      ctx.fillStyle = "#8a9098";
-      ctx.beginPath();
-      ctx.moveTo(45, 88);
-      ctx.lineTo(48, 80);
-      ctx.lineTo(42, 80);
-      ctx.closePath();
-      ctx.fill();
-    }),
 
     wagon: make(112, 78, (ctx) => {
       // колеса

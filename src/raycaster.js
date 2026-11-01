@@ -11,6 +11,11 @@ const SCREEN_H = 360;
 const FOV_PLANE = 0.66;
 const MAX_DIST = 40;
 
+// Рост человека на экране: SCREEN_H / depth * HUMAN_SCALE.
+// 1.16 при глубине 4 даёт ~104 px — крупная фигура в паре шагов,
+// но не во весь экран. Все люди мира держатся этой линейки.
+const HUMAN_SCALE = 1.16;
+
 // Уровней на канал: меньше — грубее и «аутентичнее», больше — чище.
 const DITHER_LEVELS = 16;
 // Доля высоты стены, занятая крышей-фронтоном.
@@ -402,9 +407,10 @@ export class Renderer {
           x: actor.x,
           y: actor.y,
           sprite: actor.spriteKey || actor.kind,
-          // Куртизанки нарисованы в 96×184 — им нужен свой масштаб,
-          // иначе при общем 0.94 они выходят мельче стражника.
-          scale: actor.kind === "courtesan" ? 1.18 : 0.94,
+          // Высота на экране = SCREEN_H / depth * scale, размер холста
+          // на неё не влияет (он задаёт только пропорции ширины).
+          // Поэтому все люди — на одной линейке, а не кто во что горазд.
+          scale: actor.kind === "courtesan" ? HUMAN_SCALE + 0.05 : HUMAN_SCALE,
           bob: 0,
           alert: false,
           actor: null,
@@ -419,7 +425,7 @@ export class Renderer {
         x: actor.x,
         y: actor.y,
         sprite: actor.spriteKey || actor.kind,
-        scale: actor.kind === "driver" ? 0.9 : 0.94,
+        scale: actor.kind === "driver" ? HUMAN_SCALE - 0.03 : HUMAN_SCALE,
         bob: actor.state === "chase" ? 1 : 0,
         alert: actor.state === "chase",
         actor: actor.kind === "courtesan" ? null : actor,
@@ -457,7 +463,7 @@ export class Renderer {
         x: person.x,
         y: person.y,
         sprite: person.spriteKey || person.kind,
-        scale: 0.9,
+        scale: HUMAN_SCALE,
         bob: person.state === "walk" ? 1 : 0,
         alert: false,
         actor: null,
