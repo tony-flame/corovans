@@ -61,6 +61,10 @@ export class Renderer {
     this.light = 1;
     this.lightmap = null;
     this.ditherStrength = 0.28;
+    // Кэш затемнённых спрайтов: ctx.filter — программная композиция Skia,
+    // и на каждом спрайте он стоил дороже, чем весь рейкастинг.
+    // 8 ступеней яркости на спрайт, дальше обычный drawImage.
+    this.spriteShade = new Map();
     // Таблицы дизера и константы подмеса: в горячем цикле пола нельзя
     // считать их на каждый пиксель.
     this.qt = makeQuantTables(DITHER_LEVELS, this.ditherStrength);
@@ -502,6 +506,36 @@ export class Renderer {
     }
   }
 
+  // Затемнённая копия спрайта по ступени яркости.
+  // ctx.filter в Chrome уходит в программную растеризацию: на каждое дерево
+  // в кадре это полный проход Skia. Здесь спрайт затемняется ОДИН раз,
+  // дальше рисуется обычным drawImage.
+  shadedSprite(sprite, key, brightness) {
+    // 8 ступеней: разница между соседними не видна, а кэш маленький.
+    const step = Math.max(0.25, Math.min(1.15, Math.round(brightness * 8) / 8));
+    const cacheKey = `${key}:${step}`;
+    const cached = this.spriteShade.get(cacheKey);
+    if (cached) return cached;
+
+    // Больше 40 ключей — забываем всё: кэш не должен расти бесконечно.
+    if (this.spriteShade.size > 40 * 8) this.spriteShade.clear();
+
+    const c = document.createElement("canvas");
+    c.width = sprite.width;
+    c.height = sprite.height;
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    g.drawImage(sprite, 0, 0);
+    // Затемнение через multiply: без filter, только композиция.
+    g.globalCompositeOperation = "source-atop";
+    g.fillStyle = `rgba(0, 0, 0, ${Math.max(0, Math.min(1, 1 - step))})`;
+    g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = "source-over";
+
+    this.spriteShade.set(cacheKey, c);
+    return c;
+  }
+
   drawSprites(world, player, horizon, time, state = {}) {
     const ctx = this.ctx;
     const suspicionSource = state.suspicionSource || ((actor) => actor.suspicion);
@@ -686,11 +720,11 @@ export class Renderer {
       const alpha = Math.max(0.85, Math.min(1, 1.15 - transformY * 0.01));
       ctx.globalAlpha = alpha;
 
-      // Затемнение спрайта по освещению: без этого всё светится ночью.
-      const canFilter = typeof ctx.filter === "string";
-      if (canFilter) {
-        ctx.filter = `brightness(${spriteLight.toFixed(3)}) saturate(0.9)`;
-      }
+      // Затемнение спрайта по освещению: вместо ctx.filter — готовая копия
+      // из кэша. Ночью и в тени это тот же результат, но без Skia-фильтра.
+      const shaded = spriteLight < 0.99
+        ? this.shadedSprite(sprite, item.sprite, spriteLight)
+        : sprite;
 
       let runStart = -1;
       for (let col = startX; col <= endX + 1; col++) {
@@ -702,7 +736,7 @@ export class Renderer {
           const sx = ((runStart - left) / spriteW) * sprite.width;
           const sw = ((runEnd - runStart) / spriteW) * sprite.width;
           ctx.drawImage(
-            sprite,
+            shaded,
             Math.max(0, sx),
             0,
             Math.max(0.5, sw),
@@ -715,7 +749,6 @@ export class Renderer {
           runStart = -1;
         }
       }
-      if (canFilter) ctx.filter = "none";
       ctx.globalAlpha = 1;
 
       if (item.actor && showSuspicion) {
