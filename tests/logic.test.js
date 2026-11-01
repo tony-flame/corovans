@@ -19,7 +19,7 @@ import {
   sellMultiplier,
 } from "../src/economy.js";
 import { damageRoll, applyArmor, inMeleeCone, attackCooldown, stealTime } from "../src/combat.js";
-import { createWorld, canStand, isSolid, tileAt, TILE, spawnCamp, lineOfSight } from "../src/world.js";
+import { createWorld, canStand, isSolid, tileAt, TILE, spawnCamp, lineOfSight, isWaterTile, isWallTile, hasPath, SPAWN, MERCHANT_POS, WAGON_BASE } from "../src/world.js";
 
 test("inventory: вместимость, вес и продажа", () => {
   const inv = createInventory(5);
@@ -85,7 +85,7 @@ test("combat: урон, броня и конус удара", () => {
   assert.ok(stealTime(2) < stealTime(0));
 });
 
-test("world: спавн, стены и дорога", () => {
+test("world: спавн, стены, дорога и вода", () => {
   const world = createWorld();
   assert.equal(isSolid(world, world.spawn.x, world.spawn.y), false);
   assert.equal(canStand(world, world.spawn.x, world.spawn.y, 0.26), true);
@@ -97,9 +97,22 @@ test("world: спавн, стены и дорога", () => {
   // Дом в деревне непроходим.
   assert.equal(canStand(world, 11, 72, 0.26), false, "внутри дома стоять нельзя");
 
-  // Обзор вдоль улицы свободен, сквозь дом — нет.
-  assert.equal(lineOfSight(world, 12.5, 92.5, 30.5, 92.5), true, "площадь просматривается");
-  assert.equal(lineOfSight(world, 11, 72, 11, 78), false, "дом перекрывает обзор");
+  // Тракт остаётся проходимым: вода его не перекрывает.
+  assert.equal(tileAt(world, 60.5, 86.5), TILE.ROAD, "тракт на востоке");
+
+  // Обзор вдоль площади свободен: короткий отрезок в стороне от куста у спавна.
+  assert.equal(lineOfSight(world, 14, 92.5, 28, 92.5), true, "площадь просматривается");
+
+  // Вода непроходима, но не является стеной для рендера.
+  assert.equal(isWaterTile(TILE.WATER), true);
+  assert.equal(isWallTile(TILE.WATER), false);
+});
+
+test("world: вода и река не перекрывают маршрут", () => {
+  const world = createWorld();
+  // Через мост идёт путь к фургону.
+  assert.equal(hasPath(world, SPAWN, WAGON_BASE), true, "река перекрыла путь к каравану");
+  assert.equal(hasPath(world, SPAWN, MERCHANT_POS), true, "река перекрыла путь к Мардо");
 });
 
 test("world: уровни каравана и сброс фургона", () => {

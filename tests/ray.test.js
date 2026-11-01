@@ -18,8 +18,8 @@ const wallPixels = (dist) => SCREEN_H / dist;
 
 test("ray: промах в открытое поле не даёт стену в упор", () => {
   const world = createWorld();
-  // Чистое поле к востоку от деревни: до ближайшей постройки больше 40 тайлов.
-  const ray = castRay(world, 60.5, 80.5, 1, 0, MAX_RAY_DIST);
+  // Чистое поле южнее леса: построек там нет.
+  const ray = castRay(world, 60.5, 66.5, 1, 0, MAX_RAY_DIST);
 
   assert.equal(ray.hit, false, "в открытом поле попадания быть не должно");
   assert.equal(ray.dist, MAX_RAY_DIST, "промах уходит в максимальную дальность");

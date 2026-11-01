@@ -95,8 +95,21 @@ function roadTexture() {
   }, 51);
 }
 
-function dirtTexture() {
+// Вода: тёмно-синяя с бликами волн.
+function waterTexture() {
   return makeTexture((x, y) => {
+    const wave = Math.sin(x * 0.28 + y * 0.17) * 0.5 + Math.sin(x * 0.11 - y * 0.31) * 0.5;
+    const n = rand2(x, y, 131) * 10 - 5;
+    const base = 34 + wave * 12 + n;
+    // редкие блики
+    if (rand2(x >> 1, y >> 1, 132) > 0.93) {
+      return [base + 60, base + 70, base + 76];
+    }
+    return [base * 0.45, base * 0.85, base * 1.4];
+  }, 131);
+}
+
+function dirtTexture() {  return makeTexture((x, y) => {
     const patch = rand2(x >> 2, y >> 2, 61) * 16 - 8;
     const n = rand2(x, y, 62) * 16 - 8;
     // Грязь и следы: пятна темнее, редкие камешки светлее.
@@ -252,6 +265,8 @@ export function buildTextures() {
       0: grassTexture(),
       4: roadTexture(),
       5: dirtTexture(),
+      // Вода — пол, а не стена: рисуется в floor casting.
+      8: waterTexture(),
       cobble: cobbleTexture(),
     },
   };

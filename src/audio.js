@@ -129,6 +129,32 @@ export class AudioSys {
     }
   }
 
+  // Рычание стража при обнаружении: низкое, раскатистое.
+  guardGrowl() {
+    this.tone(115, 0.42, "sawtooth", 0.11, 72);
+    this.noise(0.3, 0.08, 260, 0.6);
+    setTimeout(() => this.tone(98, 0.22, "sawtooth", 0.08, 60), 160);
+  }
+
+  // Попадание по стражу: хрип и лязг доспеха.
+  guardHit() {
+    this.noise(0.13, 0.16, 520, 0.9);
+    this.tone(150, 0.16, "square", 0.09, 85);
+    this.tone(880, 0.06, "triangle", 0.05, 620);
+  }
+
+  // Смерть стража: падение и последний выдох.
+  guardDeath() {
+    this.tone(180, 0.5, "sawtooth", 0.1, 55);
+    this.noise(0.35, 0.1, 300, 0.7);
+    setTimeout(() => this.noise(0.22, 0.14, 180, 0.9), 200);
+  }
+
+  // Тяжёлые шаги стражи: редко, тихо, чтобы не раздражать.
+  guardStep() {
+    this.noise(0.07, 0.05, 220, 1.4);
+  }
+
   hurt() {
     this.tone(140, 0.3, "sawtooth", 0.12, 60);
     this.noise(0.15, 0.1, 300, 0.7);

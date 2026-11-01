@@ -12,6 +12,8 @@ export const TILE = {
   // Фахверк: кирпич или штукатурка с тёмным каркасом.
   BRICK_FRAME: 6,
   PLASTER_FRAME: 7,
+  // Вода: непроходима, анимируется в рендере.
+  WATER: 8,
 };
 
 export const MAP_W = 120;
@@ -55,6 +57,11 @@ export function isWallTile(t) {
     t === TILE.BRICK_FRAME ||
     t === TILE.PLASTER_FRAME
   );
+}
+
+// Вода: пройти нельзя, но и стеной не является — она низкая и видно сквозь.
+export function isWaterTile(t) {
+  return t === TILE.WATER;
 }
 
 // Раскладки стоянки по архетипам (смещения от WAGON_BASE внутри зоны лагеря).
@@ -161,7 +168,34 @@ export function createWorld() {
   fillRect(18, 82, 19, 95, TILE.ROAD); // переулок
   fillRect(ZONES.SQUARE.x0, ZONES.SQUARE.y0, ZONES.SQUARE.x1, ZONES.SQUARE.y1, TILE.DIRT);
 
-  // Ряд A — север деревни. Фахверк: кирпич и штукатурка с тёмным каркасом.
+  // ── Вода: озеро на юго-западе и река западнее леса ──
+  // Важно: вода НЕ должна пересекаться с домами и дорогами — поэтому
+  // озеро вынесено ниже деревни (y >= 108), а река идёт западнее леса.
+  for (let y = 108; y <= 116; y++) {
+    for (let x = 4; x <= 22; x++) {
+      const dx = (x - 13) / 8.5;
+      const dy = (y - 112) / 4.5;
+      const d = dx * dx + dy * dy;
+      if (d < 0.85 + ((x * 7 + y * 13) % 5) * 0.05) {
+        setTile(x, y, TILE.WATER);
+      }
+    }
+  }
+
+  // Река: извилистая полоса с севера на юг, западнее леса (лес начинается с x=30).
+  let riverX = 24;
+  for (let y = 30; y <= 62; y++) {
+    riverX += ((y * 17) % 5) - 2;
+    riverX = Math.max(21, Math.min(26, riverX));
+    setTile(riverX, y, TILE.WATER);
+    setTile(riverX + 1, y, TILE.WATER);
+    if (y % 7 === 0) setTile(riverX + 2, y, TILE.WATER);
+  }
+
+  // Река кончается севернее тракта, поэтому мост не нужен:
+  // тракт идёт по y=86..87 и воды там нет.
+
+  // ── Ряд A — север деревни. Фахверк: кирпич и штукатурка с тёмным каркасом. ──
   fillRect(9, 70, 13, 74, TILE.WOOD);
   fillRect(16, 70, 20, 74, TILE.BRICK_FRAME);
   fillRect(24, 70, 28, 74, TILE.PLASTER_FRAME);
@@ -180,6 +214,30 @@ export function createWorld() {
   // Дворы: сараи (входимые) и заборы
   hollowRect(31, 84, 35, 88, TILE.WOOD, "south");
 
+  // ── Храм: крупное здание на востоке деревни, входимое ──
+  // Корпус 12×14 с нефом внутри и входом с запада.
+  fillRect(48, 92, 60, 106, TILE.STONE);
+  fillRect(49, 93, 59, 105, TILE.DIRT); // внутренний пол
+  // Вход: проём в западной стене
+  fillRect(48, 98, 48, 100, TILE.DIRT);
+  // Алтарь — выступ в восточной стене
+  fillRect(58, 97, 59, 101, TILE.STONE);
+  // ── Дворец/ратуша: северо-восток, входимый вестибюль ──
+  fillRect(72, 90, 92, 104, TILE.BRICK_FRAME);
+  fillRect(73, 91, 91, 103, TILE.DIRT);
+  // Вход с юга
+  fillRect(81, 103, 83, 103, TILE.DIRT);
+  // Колонны внутри вестибюля (пропы добавятся позже)
+  fillRect(78, 95, 78, 95, TILE.STONE);
+  fillRect(86, 95, 86, 95, TILE.STONE);
+
+  // ── Таверна у тракта: входимая, со стойкой ──
+  fillRect(66, 78, 74, 86, TILE.WOOD);
+  fillRect(67, 79, 73, 85, TILE.DIRT);
+  fillRect(70, 85, 70, 85, TILE.DIRT); // вход с юга
+  // Стойка внутри
+  fillRect(68, 80, 72, 80, TILE.WOOD);
+
   // ── Придорожные постройки за городом ──
   fillRect(50, 74, 54, 78, TILE.PLASTER_FRAME); // придорожный дом
   fillRect(58, 74, 62, 78, TILE.BRICK_FRAME); // корчма
@@ -192,19 +250,54 @@ export function createWorld() {
   // ── Стойбище ──
   fillRect(ZONES.CAMP.x0, ZONES.CAMP.y0, ZONES.CAMP.x1, ZONES.CAMP.y1, TILE.DIRT);
 
-  // ── Лес: плотные деревья, оставляем тропы ──
-  const forestRows = [];
-  for (let y = ZONES.FOREST.y0; y <= ZONES.FOREST.y1; y += 6) {
-    for (let x = ZONES.FOREST.x0; x <= ZONES.FOREST.x1; x += 8) {
-      forestRows.push([x, y]);
-    }
-  }
-  for (const [x, y] of forestRows) fillRect(x, y, x + 2, y + 2, TILE.GRASS);
+  // Лес строится пропами ниже — старые «дырки в траве» убраны.
 
   const props = [];
   const addProp = (sprite, x, y, r, scale, solid = true, blocksSight = false) => {
     props.push({ sprite, x, y, r, scale, solid, blocksSight });
   };
+
+  // ── Лес: настоящие деревья, а не дырки в траве ──
+  // Тропа идёт через лес к руинам, поэтому оставляем коридор x≈48-50.
+  const forestTrees = [];
+  for (let y = ZONES.FOREST.y0 + 1; y <= ZONES.FOREST.y1 - 1; y += 2.2) {
+    for (let x = ZONES.FOREST.x0 + 1; x <= ZONES.FOREST.x1 - 1; x += 2.4) {
+      // Коридор к руинам
+      if (x > 46 && x < 51) continue;
+      // Разрежение ближе к краю, чтобы лес не был стеной
+      const edge = Math.min(
+        x - ZONES.FOREST.x0,
+        ZONES.FOREST.x1 - x,
+        y - ZONES.FOREST.y0,
+        ZONES.FOREST.y1 - y
+      );
+      if (edge < 3 && (Math.round(x * 3 + y * 7) % 3 !== 0)) continue;
+
+      forestTrees.push([x + ((Math.round(y * 13) % 7) - 3) * 0.12, y]);
+    }
+  }
+  for (let i = 0; i < forestTrees.length; i++) {
+    const [x, y] = forestTrees[i];
+    // Треть — ели, каждая седьмая — сухая.
+    const kind = i % 7 === 0 ? "deadTree" : i % 3 === 0 ? "pine" : "tree";
+    addProp(kind, x, y, kind === "pine" ? 0.42 : 0.36, kind === "pine" ? 1.45 : 1.4, true, true);
+  }
+
+  // ── Пропы: храм, дворец, таверна ──
+  addProp("altar", 57.5, 99, 0.45, 0.85, true, false);
+  // Колонны в храме
+  addProp("pillar", 52.5, 96.5, 0.35, 1.4, true, true);
+  addProp("pillar", 52.5, 102.5, 0.35, 1.4, true, true);
+  addProp("pillar", 56.5, 96.5, 0.35, 1.4, true, true);
+  addProp("pillar", 56.5, 102.5, 0.35, 1.4, true, true);
+  // Колонны дворца
+  addProp("pillar", 78.5, 95.5, 0.35, 1.5, true, true);
+  addProp("pillar", 86.5, 95.5, 0.35, 1.5, true, true);
+  addProp("throne", 82.5, 93.5, 0.5, 1.1, true, false);
+  // Таверна: стойка и бочки
+  addProp("counter", 70.5, 80.6, 0.55, 0.7, true, false);
+  addProp("barrel", 68.5, 84.2, 0.3, 0.55, true, false);
+  addProp("barrel", 72.5, 84.2, 0.3, 0.55, true, false);
 
   // ── Пропы: стоянка ──
   addProp("wagon", WAGON_BASE.x, WAGON_BASE.y, 1.15, 0.95, true, true);
@@ -499,7 +592,9 @@ export function isSolid(world, x, y) {
   const cx = Math.floor(x);
   const cy = Math.floor(y);
   if (cx < 0 || cy < 0 || cx >= MAP_W || cy >= MAP_H) return true;
-  return isWallTile(world.map[cy * MAP_W + cx]);
+  const tile = world.map[cy * MAP_W + cx];
+  // Вода непроходима, но для рендера стен это не стена: вода рисуется полом.
+  return isWallTile(tile) || isWaterTile(tile);
 }
 
 export function tileAt(world, x, y) {

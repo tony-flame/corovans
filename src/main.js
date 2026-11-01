@@ -81,7 +81,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-01-titan-1";
+const BUILD = "2026-11-02-world-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
@@ -1321,7 +1321,12 @@ function performAttack() {
   target.hp -= dmg;
   if (target.asleep) target.asleep = false;
   ui.flashHit();
-  audio.hit();
+  // Стражник хрипит от попадания, обычные цели — просто удар.
+  if (target.kind === "guard" || target.kind === "village_guard" || target.kind === "driver") {
+    audio.guardHit();
+  } else {
+    audio.hit();
+  }
   alertNoise(player.x, player.y, 9);
 
   if (target.hp <= 0) {
@@ -1400,6 +1405,7 @@ function killActor(actor) {
   run.counters.killsSinceAccept += 1;
   if (actor.kind === "driver") run.counters.driverKilledSinceAccept = true;
   noteStyle("kill");
+  audio.guardDeath();
   audio.coin();
 
   const label =
@@ -1572,6 +1578,10 @@ function tickBleed(dt) {
 }
 
 game.onGuardAlert = (actor) => {
+  // Рычание — всегда, даже если сообщение подавлено кулдауном.
+  if (actor && (actor.kind === "guard" || actor.kind === "village_guard")) {
+    audio.guardGrowl();
+  }
   if (game.time - game.lastAlertMsg > 3) {
     game.lastAlertMsg = game.time;
     ui.message("Вас заметили!");

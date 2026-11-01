@@ -122,6 +122,7 @@ export class Renderer {
     const horizon = SCREEN_H * 0.5 + player.bobY - (player.pitch || 0);
     this.light = LIGHT_LEVELS[light] !== undefined ? LIGHT_LEVELS[light] : 1;
     this.lightmap = lightmap;
+    this.time = time;
     this.renderSky(player, horizon, weather);
     this.renderFloor(world, player, horizon);
     this.renderWalls(world, player, horizon);
@@ -229,7 +230,12 @@ export class Renderer {
         const ty = ((floorY - cy) * TEX_SIZE) | 0;
         const c = tex[(ty & 63) * TEX_SIZE + (tx & 63)];
         const lightHere = useLight ? sampleLight(this.lightmap, floorX, floorY) : 1;
-        const shade = rowShade * lightHere;
+        // Вода «дышит»: медленная волна яркости по времени.
+        let shimmer = 1;
+        if (tile === TILE.WATER) {
+          shimmer = 0.88 + Math.sin(this.time * 1.7 + floorX * 0.7 + floorY * 0.5) * 0.12;
+        }
+        const shade = rowShade * lightHere * shimmer;
         const sr = (c & 255) * shade * (1 - fogT) + fr;
         const sg = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
         const sb = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
@@ -303,9 +309,17 @@ export class Renderer {
         const occlusion = wallOcclusion((y - wallTop) / span, 0.4);
         const shade = baseShade * occlusion * tileLight;
 
-        const sr = (c & 255) * shade * (1 - fogT) + fr;
-        const sg = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
-        const sb = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
+        // Крыша: верхняя часть стены — тёмная кромка со свесом.
+        // Настоящей геометрии крыши в рейкастере нет, но тёмная полоса
+        // убирает ощущение «колодца» и читается как свес.
+        const roofT = (y - wallTop) / span;
+        const roofShade = roofT < 0.09 ? 0.28 : roofT < 0.13 ? 0.55 : 1;
+        const roofTint = roofT < 0.09 ? 0.55 : 1;
+        const finalShade = shade * roofShade;
+
+        const sr = (c & 255) * finalShade * (1 - fogT) + fr * roofTint;
+        const sg = ((c >> 8) & 255) * finalShade * (1 - fogT) + fg * roofTint;
+        const sb = ((c >> 16) & 255) * finalShade * (1 - fogT) + fb * roofTint;
 
         // Подмес мутного сумрака в тени и дизеринг каналов.
         const murked = murk(sr, sg, sb, 0.16);
@@ -474,8 +488,13 @@ export class Renderer {
         ctx.restore();
       }
 
-      const alpha = Math.max(0.4, Math.min(1, 1.15 - transformY * 0.028));
-      ctx.globalAlpha = alpha * ambientAlpha;
+      // Затухание по дистанции: раньше нижняя граница была 0.4,
+      // и всё на средней дистанции выглядело стеклянным.
+      // Теперь объект остаётся почти непрозрачным, а дальше его съедает туман.
+      // ambientAlpha НЕ домножаем: освещение уже применяется через filter,
+      // а прозрачность от света делала объекты призрачными в тени.
+      const alpha = Math.max(0.85, Math.min(1, 1.15 - transformY * 0.01));
+      ctx.globalAlpha = alpha;
 
       // Затемнение спрайта по освещению: без этого всё светится ночью.
       const canFilter = typeof ctx.filter === "string";
