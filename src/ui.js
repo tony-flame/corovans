@@ -4,6 +4,7 @@ import { contractName } from "./contracts.js";
 import { STYLE_LABELS, STYLE_HINTS, archetypeLabel } from "./style.js";
 import { UNLOCKS, UNLOCK_ORDER, canUnlock } from "./profile.js";
 import { phaseLabel } from "./daynight.js";
+import { buildIntroCanvas } from "./intro.js";
 
 export class UI {
   constructor(handlers) {
@@ -214,8 +215,20 @@ export class UI {
 
   showStart(hasSave) {
     this.startEl.classList.remove("hidden");
+    this.fillIntro("start-art", "dusk");
     const loadBtn = this.$("load-btn");
     if (loadBtn) loadBtn.classList.toggle("hidden", !hasSave);
+  }
+
+  // Заставка вставляется один раз: перерисовка на каждый показ
+  // заставляла бы canvas собираться заново без причины.
+  fillIntro(slotId, kind) {
+    const slot = this.$(slotId);
+    if (!slot || slot.dataset.kind === kind) return;
+    slot.dataset.kind = kind;
+    slot.textContent = "";
+    const art = buildIntroCanvas(kind);
+    if (art) slot.appendChild(art);
   }
 
   hideStart() {
@@ -575,6 +588,8 @@ export class UI {
     this.endTitle.style.color = victory ? "#d8b25a" : "#c94a3e";
     this.endText.textContent = text;
     this.$("continue-btn").classList.toggle("hidden", !victory);
+    // Смерть и победа получают свою заставку.
+    this.fillIntro("end-art", victory ? "gold" : "death");
     this.endEl.classList.remove("hidden");
   }
 

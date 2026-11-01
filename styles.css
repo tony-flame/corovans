@@ -366,6 +366,25 @@ button:disabled {
 }
 #start button { display: block; margin: 0 auto 4px; }
 
+/* Заставки: картинка над заголовком, во всю ширину панели. */
+.intro-slot {
+  margin: -28px -32px 18px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  background: #08060a;
+  line-height: 0;
+}
+
+.intro-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+/* Смерть и победа: узкая полоса, чтобы не выдавливать текст из панели. */
+#end .intro-slot { margin: -28px -32px 16px; }
+
 #pause .panel, #help .panel, #end .panel { text-align: center; }
 #help .controls { text-align: left; display: inline-block; }
 #help p { text-align: left; }
