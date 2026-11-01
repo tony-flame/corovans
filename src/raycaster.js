@@ -291,7 +291,10 @@ export class Renderer {
       if (side === 1 && rayDirY < 0) texX = TEX_SIZE - texX - 1;
       texX = Math.max(0, Math.min(TEX_SIZE - 1, texX));
 
-      const texture = walls[tile] || walls[TILE.STONE];
+      // Фасад с окном: смотрим в карту окон, иначе — обычная текстура тайла.
+      const winKey = `${ray.mapX},${ray.mapY}`;
+      const winName = world.windowTiles && world.windowTiles.get(winKey);
+      const texture = (winName && walls[winName]) || walls[tile] || walls[TILE.STONE];
       const fogT = Math.max(0, Math.min(0.82, (perpDist - 6) / 32));
       const baseShade = Math.max(0.28, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022)) * this.light;
       // Свет по тайлам: факелы, костёр, окна. Интерполяция уже внутри.

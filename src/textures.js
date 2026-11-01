@@ -84,14 +84,30 @@ function grassTexture() {
   }, 41);
 }
 
+// Дорога: жёлтый кирпич в шахматном порядке — как в «Волшебнике страны Оз».
+// Кирпич мелкий (12×6): крупный читался как шахматная доска.
 function roadTexture() {
   return makeTexture((x, y) => {
-    const patch = rand2(x >> 2, y >> 2, 51) * 14 - 7;
-    const n = rand2(x, y, 52) * 18 - 9;
-    const r = rand2(x, y, 53);
-    if (r > 0.965) return [64 + n, 60 + n, 52 + n];
-    if (r > 0.93) return [122 + n, 112 + n, 94 + n];
-    return [92 + patch + n, 84 + patch + n, 70 + patch * 0.8 + n];
+    const row = (y / 6) | 0;
+    const offset = (row & 1) * 6;
+    const bx = (x + offset) % 12;
+    const by = y % 6;
+    const n = rand2(x, y, 51) * 12 - 6;
+
+    // Швы.
+    if (by === 0 || bx === 0) {
+      const m = rand2(x, y, 54) * 8 - 4;
+      return [58 + m, 48 + m, 26 + m];
+    }
+
+    const brick = rand2((x + offset) / 12 | 0, row, 53);
+    // Песочный кирпич: тёплый, но грязный — не лимонный.
+    const base = 118 + brick * 34 + n;
+    return [
+      base,
+      base * 0.80 + n * 0.4,
+      base * 0.44 + n * 0.3,
+    ];
   }, 51);
 }
 
@@ -107,6 +123,69 @@ function waterTexture() {
     }
     return [base * 0.45, base * 0.85, base * 1.4];
   }, 131);
+}
+
+// Окно на фасаде: базовый материал + окно с рамой и переплётом.
+// Окно рисуется в верхней половине тайла, чтобы читаться как жилое.
+function withWindow(baseFn, glass = [42, 58, 74]) {
+  return makeTexture((x, y) => {
+    const inWindow = x >= 20 && x < 44 && y >= 12 && y < 40;
+    if (inWindow) {
+      const localX = x - 20;
+      const localY = y - 12;
+      const frame = localX < 3 || localX > 21 || localY < 3 || localY > 25;
+      const cross = Math.abs(localX - 12) < 2 || Math.abs(localY - 14) < 2;
+
+      if (frame) return [64, 52, 38];      // тёмная деревянная рама
+      if (cross) return [74, 62, 46];      // переплёт
+      const shine = localX < 7 && localY < 9;
+      if (shine) return [96, 112, 126];
+      return glass;
+    }
+
+    // Подоконник: светлая полоса под окном.
+    if (x >= 18 && x < 46 && y >= 40 && y < 43) return [96, 84, 64];
+
+    return baseFn(x, y);
+  });
+}
+
+function brickWindowTexture() {
+  return withWindow((x, y) => {
+    const row = (y / 8) | 0;
+    const offset = (row & 1) * 8;
+    const bx = (x + offset) % 16;
+    const by = y % 8;
+    const n = rand2(x, y, 11) * 18 - 9;
+    if (by === 0 || bx === 0) {
+      const m = rand2(x, y, 12) * 10 - 5;
+      return [56 + m, 48 + m, 40 + m];
+    }
+    const brick = rand2((x + offset) / 16 | 0, row, 13);
+    const base = 98 + brick * 28 + n;
+    return [base, base * 0.48 + n * 0.4, base * 0.34 + n * 0.3];
+  });
+}
+
+function plasterWindowTexture() {
+  return withWindow((x, y) => {
+    const n = rand2(x, y, 71) * 14 - 7;
+    const patch = rand2(x >> 3, y >> 3, 72) * 14 - 7;
+    const moss = y > 52 ? 10 : 0;
+    return [146 + patch + n - moss, 134 + patch + n - moss, 112 + patch + n - moss * 1.4];
+  });
+}
+
+function woodWindowTexture() {
+  return withWindow((x, y) => {
+    const plank = (x / 8) | 0;
+    const localX = x % 8;
+    const grain = rand2(x, y >> 1, 21) * 16 - 8;
+    const pv = rand2(plank, 0, 22) * 18 - 9;
+    if (localX === 0) return [34 + grain * 0.3, 24, 14];
+    const base = 86 + pv + grain;
+    return [base, base * 0.62, base * 0.36];
+  });
 }
 
 function dirtTexture() {  return makeTexture((x, y) => {
@@ -256,6 +335,10 @@ export function buildTextures() {
       // Фахверк: кирпич и штукатурка с тёмным каркасом.
       6: withBaseShadow(brickFrameTexture()),
       7: withBaseShadow(plasterFrameTexture()),
+      // Фасады с окнами — ставятся только на сторону к улице.
+      brick_window: withBaseShadow(brickWindowTexture()),
+      plaster_window: withBaseShadow(plasterWindowTexture()),
+      wood_window: withBaseShadow(woodWindowTexture()),
       // Новые материалы для разнообразия фасадов и сараев.
       plaster: withBaseShadow(plasterTexture()),
       thatch: withBaseShadow(thatchTexture(), TEX_SIZE, 0.22),

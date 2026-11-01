@@ -152,6 +152,25 @@ export function createWorld() {
     else if (gate === "east") fillRect(x1, Math.floor((y0 + y1) / 2), x1, Math.floor((y0 + y1) / 2), TILE.DIRT);
   };
 
+  // Дом с окнами: сплошной блок, но фасады получают оконную текстуру.
+  // windowed — какой стороне дать окна: "s" (юг), "n", "e", "w" или массив.
+  const addWalls = new Map();
+  const house = (x0, y0, x1, y1, t, windowed = "s") => {
+    fillRect(x0, y0, x1, y1, t);
+    const sides = Array.isArray(windowed) ? windowed : [windowed];
+    const windowTile = t === TILE.WOOD ? "wood_window"
+      : t === TILE.PLASTER_FRAME ? "plaster_window"
+      : "brick_window";
+
+    for (const side of sides) {
+      const setWin = (x, y) => addWalls.set(`${x},${y}`, windowTile);
+      if (side === "s") for (let x = x0 + 1; x < x1; x += 2) setWin(x, y1);
+      else if (side === "n") for (let x = x0 + 1; x < x1; x += 2) setWin(x, y0);
+      else if (side === "w") for (let y = y0 + 1; y < y1; y += 2) setWin(x0, y);
+      else if (side === "e") for (let y = y0 + 1; y < y1; y += 2) setWin(x1, y);
+    }
+  };
+
   // ── Границы мира ──
   fillRect(0, 0, MAP_W - 1, 0, TILE.STONE);
   fillRect(0, MAP_H - 1, MAP_W - 1, MAP_H - 1, TILE.STONE);
@@ -195,21 +214,21 @@ export function createWorld() {
   // Река кончается севернее тракта, поэтому мост не нужен:
   // тракт идёт по y=86..87 и воды там нет.
 
-  // ── Ряд A — север деревни. Фахверк: кирпич и штукатурка с тёмным каркасом. ──
-  fillRect(9, 70, 13, 74, TILE.WOOD);
-  fillRect(16, 70, 20, 74, TILE.BRICK_FRAME);
-  fillRect(24, 70, 28, 74, TILE.PLASTER_FRAME);
-  fillRect(32, 70, 36, 74, TILE.BRICK_FRAME);
+  // ── Ряд A — север деревни. Фахверк с окнами на юг, к улице. ──
+  house(9, 70, 13, 74, TILE.WOOD, "s");
+  house(16, 70, 20, 74, TILE.BRICK_FRAME, "s");
+  house(24, 70, 28, 74, TILE.PLASTER_FRAME, "s");
+  house(32, 70, 36, 74, TILE.BRICK_FRAME, "s");
 
   // Ряд B — между верхней улицей и площадью
-  fillRect(9, 83, 13, 86, TILE.PLASTER_FRAME);
-  fillRect(23, 83, 27, 86, TILE.BRICK_FRAME);
+  house(9, 83, 13, 86, TILE.PLASTER_FRAME, "n");
+  house(23, 83, 27, 86, TILE.BRICK_FRAME, "n");
 
   // Ряд C — юг деревни
-  fillRect(8, 99, 12, 103, TILE.STONE);
-  fillRect(15, 99, 19, 103, TILE.WOOD);
-  fillRect(24, 99, 28, 103, TILE.BRICK);
-  fillRect(31, 99, 35, 103, TILE.STONE);
+  house(8, 99, 12, 103, TILE.STONE, "n");
+  house(15, 99, 19, 103, TILE.WOOD, "n");
+  house(24, 99, 28, 103, TILE.BRICK, "n");
+  house(31, 99, 35, 103, TILE.STONE, "n");
 
   // Дворы: сараи (входимые) и заборы
   hollowRect(31, 84, 35, 88, TILE.WOOD, "south");
@@ -252,10 +271,32 @@ export function createWorld() {
 
   // Лес строится пропами ниже — старые «дырки в траве» убраны.
 
+  // Оконные тайлы записываются в отдельную карту имён: сама карта хранит
+  // номера TILE, а текстура окна выбирается по имени. Собираем их здесь,
+  // ПОСЛЕ всех построек, чтобы проёмы и стены не перезаписали окна.
+  const windowTiles = addWalls;
+
   const props = [];
   const addProp = (sprite, x, y, r, scale, solid = true, blocksSight = false) => {
     props.push({ sprite, x, y, r, scale, solid, blocksSight });
   };
+
+  // ── Кустарники терна и крестьянские хижины ──
+  const thornSpots = [
+    [12, 88], [20, 84], [28, 96], [36, 92], [44, 90],
+    [18, 102], [26, 104], [34, 98], [48, 88], [52, 96],
+    [6, 94], [40, 70], [46, 74], [56, 92], [62, 88],
+  ];
+  for (const [x, y] of thornSpots) addProp("thorn", x, y, 0.34, 0.8, true, true);
+
+  // Хижины: маленькие дома по краю деревни.
+  const huts = [
+    [4, 78], [6, 106], [40, 78], [44, 100], [52, 68],
+  ];
+  for (const [x, y] of huts) addProp("hut", x, y, 0.75, 1.05, true, true);
+
+  // Живые изгороди вдоль улиц.
+  for (let x = 20; x <= 34; x += 3) addProp("hedge", x, 100.5, 0.4, 0.7, true, false);
 
   // ── Лес: настоящие деревья, а не дырки в траве ──
   // Тропа идёт через лес к руинам, поэтому оставляем коридор x≈48-50.
@@ -426,6 +467,8 @@ export function createWorld() {
     civilians: [],
     // Лошади: конюшенная и (по разблокировке) личная.
     horses: [],
+    // Фасады с окнами: ключ "x,y" → имя текстуры стены.
+    windowTiles,
     // Титан живёт отдельно от actors: spawnCamp его не трогает,
     // а диспетчер врагов не принимает его за стражника.
     titan: null,

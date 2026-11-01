@@ -432,6 +432,92 @@ export function buildSprites() {
       rect(ctx, 4, 40, 64, 3, "#3a2918");
     }),
 
+    // Терн: колючий куст, тёмный, с шипами.
+    thorn: make(52, 40, (ctx) => {
+      ellipse(ctx, 26, 30, 22, 10, "#1e2418");
+      // ветки
+      ctx.strokeStyle = "#2a2a20";
+      ctx.lineWidth = 2;
+      const branches = [
+        [26, 30, 8, 16], [26, 30, 44, 14], [26, 30, 18, 8],
+        [26, 30, 36, 6], [26, 30, 12, 26], [26, 30, 40, 24],
+      ];
+      for (const [x1, y1, x2, y2] of branches) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      // листва
+      for (const [x, y, r] of [[12, 18, 7], [40, 16, 6], [20, 10, 6], [34, 8, 5], [14, 26, 5], [38, 26, 5]]) {
+        ellipse(ctx, x, y, r, r * 0.8, "#2f3a24");
+      }
+      // шипы
+      ctx.fillStyle = "#6a6458";
+      for (let i = 0; i < 14; i++) {
+        const x = 6 + ((i * 37) % 40);
+        const y = 6 + ((i * 23) % 28);
+        ctx.fillRect(x, y, 1.5, 3);
+      }
+    }),
+
+    // Крестьянская хижина: маленькая, соломенная крыша, входимая.
+    hut: make(74, 76, (ctx) => {
+      // стены
+      rect(ctx, 8, 34, 58, 38, "#6b5a44");
+      rect(ctx, 8, 34, 58, 3, "#7d6b52");
+      // брёвна
+      for (let y = 38; y < 70; y += 6) {
+        rect(ctx, 8, y, 58, 1.5, "#5a4a38");
+      }
+      // соломенная крыша
+      ctx.fillStyle = "#b8a04a";
+      ctx.beginPath();
+      ctx.moveTo(2, 36);
+      ctx.lineTo(37, 4);
+      ctx.lineTo(72, 36);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#c9b25a";
+      ctx.beginPath();
+      ctx.moveTo(4, 34);
+      ctx.lineTo(37, 6);
+      ctx.lineTo(70, 34);
+      ctx.closePath();
+      ctx.fill();
+      // стебли соломы по краю
+      ctx.strokeStyle = "#a08a3a";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 18; i++) {
+        const t = i / 18;
+        const x = 4 + t * 66;
+        ctx.beginPath();
+        ctx.moveTo(x, 34);
+        ctx.lineTo(x + 1, 30);
+        ctx.stroke();
+      }
+      // дверь
+      rect(ctx, 30, 52, 14, 20, "#3a2a1c");
+      rect(ctx, 31, 53, 12, 18, "#4a3624");
+      ellipse(ctx, 40, 62, 1.5, 1.5, "#c9a24a");
+      // окно-щель
+      rect(ctx, 15, 44, 9, 8, "#2a3a4a");
+      rect(ctx, 18, 44, 1.5, 8, "#4a3624");
+      rect(ctx, 15, 47, 9, 1.5, "#4a3624");
+      rect(ctx, 51, 44, 9, 8, "#2a3a4a");
+      rect(ctx, 54, 44, 1.5, 8, "#4a3624");
+      rect(ctx, 51, 47, 9, 1.5, "#4a3624");
+    }),
+
+    hedge: make(60, 30, (ctx) => {
+      ellipse(ctx, 30, 18, 28, 11, "#2a3a22");
+      ellipse(ctx, 30, 14, 24, 9, "#35522a");
+      for (let i = 0; i < 10; i++) {
+        const x = 6 + ((i * 29) % 48);
+        ellipse(ctx, x, 10 + ((i * 17) % 10), 3, 2.5, "#406232");
+      }
+    }),
+
     tree: make(64, 108, (ctx) => {
       rect(ctx, 28, 58, 9, 50, "#4a3520");
       rect(ctx, 28, 58, 3, 50, "#5f4629");
