@@ -278,9 +278,14 @@ export class Renderer {
       if (!ray.hit) continue;
 
       const lineHeight = SCREEN_H / perpDist;
+      // Высокие здания: у собора и ратуши стена выше обычной.
+      // Множитель берётся из карты тайлов, а низ стены остаётся на полу —
+      // иначе здание висит в воздухе.
+      const tallKey = `${ray.mapX},${ray.mapY}`;
+      const tallMul = (world.tallTiles && world.tallTiles.get(tallKey)) || 1;
       // Камера поднята на jumpZ: верх и низ стены смещаются на jumpZ/perpDist,
       // иначе стена отрывается от пола.
-      const topOffset = (SCREEN_H * 0.5 - this.jumpZ) / perpDist;
+      const topOffset = ((SCREEN_H * 0.5) * tallMul - this.jumpZ) / perpDist;
       const bottomOffset = (SCREEN_H * 0.5 + this.jumpZ) / perpDist;
       const wallTop = horizon - topOffset;
       const drawStart = Math.floor(wallTop);
@@ -293,10 +298,13 @@ export class Renderer {
       if (side === 1 && rayDirY < 0) texX = TEX_SIZE - texX - 1;
       texX = Math.max(0, Math.min(TEX_SIZE - 1, texX));
 
-      // Фасад с окном: смотрим в карту окон, иначе — обычная текстура тайла.
+      // Скин здания (готика, замковая кладка) важнее окна и базовой текстуры.
       const winKey = `${ray.mapX},${ray.mapY}`;
+      const skinName = world.skinTiles && world.skinTiles.get(winKey);
       const winName = world.windowTiles && world.windowTiles.get(winKey);
-      const texture = (winName && walls[winName]) || walls[tile] || walls[TILE.STONE];
+      const texture = (skinName && walls[skinName])
+        || (winName && walls[winName])
+        || walls[tile] || walls[TILE.STONE];
       const fogT = Math.max(0, Math.min(0.82, (perpDist - 6) / 32));
       const baseShade = Math.max(0.28, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022)) * this.light;
       // Свет по тайлам: факелы, костёр, окна. Интерполяция уже внутри.
@@ -307,7 +315,7 @@ export class Renderer {
 
       const y0 = Math.max(0, drawStart);
       const y1 = Math.min(SCREEN_H - 1, drawEnd);
-      const step = TEX_SIZE / (drawEnd - drawStart);
+      const step = TEX_SIZE * perpDist / SCREEN_H; // текстура в натуральном масштабе
       let texPos = (y0 - wallTop) * step;
       const span = Math.max(1, drawEnd - drawStart);
 
@@ -324,12 +332,14 @@ export class Renderer {
         // Верхняя четверть стены — фронтон: черепица, конёк, свес.
         // Вид сбоку читается как скат, потому что яркость зависит
         // от расстояния до конька (texX ближе к центру — светлее).
+        // У высоких зданий (собор, ратуша) крыши нет: их фронтон начинался
+        // бы на четырёхэтажной высоте и висел чёрной полосой через экран.
         const roofT = (y - wallTop) / span;
         let finalShade = shade;
         let roofTint = 1;
         let roofColor = null;
 
-        if (roofT < ROOF_HEIGHT) {
+        if (roofT < ROOF_HEIGHT && tallMul <= 1.5) {
           // Расстояние от конька: 0 в центре тайла, 1 у края.
           const gable = Math.abs(ray.wallX - 0.5) * 2;
           // Ряды черепицы: полосы по вертикали фронтона.

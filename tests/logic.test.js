@@ -90,18 +90,18 @@ test("world: спавн, стены, дорога и вода", () => {
   assert.equal(isSolid(world, world.spawn.x, world.spawn.y), false);
   assert.equal(canStand(world, world.spawn.x, world.spawn.y, 0.26), true);
 
-  // Тракт идёт по y=86..87 через всю карту.
-  assert.equal(tileAt(world, 60.5, 86.5), TILE.ROAD);
-  assert.equal(tileAt(world, 98.5, 60.5), TILE.ROAD, "поворот на север — дорога");
+  // Тракт идёт по y=126..127 через всю карту.
+  assert.equal(tileAt(world, 100.5, 126.5), TILE.ROAD);
+  assert.equal(tileAt(world, 138.5, 100.5), TILE.ROAD, "поворот на север — дорога");
 
   // Дом в деревне непроходим.
-  assert.equal(canStand(world, 11, 72, 0.26), false, "внутри дома стоять нельзя");
+  assert.equal(canStand(world, 51, 112, 0.26), false, "внутри дома стоять нельзя");
 
   // Тракт остаётся проходимым: вода его не перекрывает.
-  assert.equal(tileAt(world, 60.5, 86.5), TILE.ROAD, "тракт на востоке");
+  assert.equal(tileAt(world, 100.5, 126.5), TILE.ROAD, "тракт на востоке");
 
-  // Обзор вдоль площади свободен: короткий отрезок в стороне от куста у спавна.
-  assert.equal(lineOfSight(world, 14, 92.5, 28, 92.5), true, "площадь просматривается");
+  // Обзор вдоль площади свободен: короткий отрезок южнее колодца.
+  assert.equal(lineOfSight(world, 54, 130.5, 68, 130.5), true, "площадь просматривается");
 
   // Вода непроходима, но не является стеной для рендера.
   assert.equal(isWaterTile(TILE.WATER), true);

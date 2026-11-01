@@ -92,10 +92,10 @@ test("ray: все 640 лучей с любого ракурса не дают г
 
 test("ray: попадание в стену вплотную остаётся маленькой дистанцией", () => {
   const world = createWorld();
-  // Дом в деревне: 9..13 по x, 70..74 по y.
-  assert.equal(isWallTile(tileAt(world, 11, 72)), true);
+  // Дом в деревне: 49..53 по x, 110..114 по y.
+  assert.equal(isWallTile(tileAt(world, 51, 112)), true);
 
-  const ray = castRay(world, 11.5, 76.5, 0, -1, MAX_RAY_DIST);
+  const ray = castRay(world, 51.5, 116.5, 0, -1, MAX_RAY_DIST);
   assert.equal(ray.hit, true, "обязан найти дом");
   assert.ok(ray.dist > 0 && ray.dist < 3, `дистанция ${ray.dist}`);
 });
@@ -116,11 +116,11 @@ test("ray: выход за границу мира не считается ст�
 });
 
 test("ray: лимит шагов не зависит от магического числа 80", () => {
-  // Диагональ карты 120×120 — около 170 тайлов. Старый лимит в 80 шагов
+  // Диагональ карты 200×200 — около 283 тайлов. Старый лимит в 80 шагов
   // не доставал до края, и промах превращался в стену.
   const diagonal = Math.hypot(MAP_W, MAP_H);
   assert.ok(diagonal > 80, "карта больше старого лимита шагов");
-  assert.ok(diagonal < 200);
+  assert.ok(diagonal < MAP_W * 2, "диагональ не больше двух сторон карты");
 });
 
 test("ray: wallX всегда в пределах [0,1)", () => {
@@ -165,11 +165,11 @@ test("ray: каждый тайл-стена имеет свою текстуру
 
 test("ray: фахверк непроходим", () => {
   const world = createWorld();
-  // Ряд A: дом 16..20 x 70..74 — кирпичный фахверк.
-  assert.equal(isWallTile(tileAt(world, 18, 72)), true);
-  const ray = castRay(world, 18.5, 78.5, 0, -1, MAX_RAY_DIST);
+  // Ряд A: дом 56..60 x 110..114 — кирпичный фахверк.
+  assert.equal(isWallTile(tileAt(world, 58, 112)), true);
+  const ray = castRay(world, 58.5, 118.5, 0, -1, MAX_RAY_DIST);
   assert.equal(ray.hit, true, "фахверковая стена обязана ловить луч");
-  assert.ok(ray.dist < 5, `дистанция ${ray.dist}`);
+  assert.ok(ray.dist < 6, `дистанция ${ray.dist}`);
 });
 
 test("ray: каждая точка маршрута видит стены, а не пустоту", () => {

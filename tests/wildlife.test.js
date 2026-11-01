@@ -28,7 +28,7 @@ import {
   PRICE_MIN,
   PRICE_MAX,
 } from "../src/npc.js";
-import { createWorld, spawnCamp, hasPath, canStand, SPAWN, MERCHANT_POS, COURTESAN_POS, WAGON_BASE, MAP_W, MAP_H, isSolid, CAMP_LAYOUTS, nearestInteraction } from "../src/world.js";
+import { createWorld, spawnCamp, hasPath, canStand, SPAWN, MERCHANT_POS, COURTESAN_POS, WAGON_BASE, MAP_W, MAP_H, isSolid, CAMP_LAYOUTS, nearestInteraction, ZONES } from "../src/world.js";
 import { updateActors, maxSuspicion } from "../src/enemies.js";
 
 test("wildlife: диспетчер не превращает животное в стражника", () => {
@@ -109,13 +109,9 @@ test("map: вокруг спавна и NPC есть место", () => {
 });
 
 test("map: зоны внутри границ", () => {
-  const world = createWorld();
-  assert.equal(MAP_W, 120);
-  assert.equal(MAP_H, 120);
-  for (const [name, z] of Object.entries({
-    camp: { x0: 92, y0: 18, x1: 110, y1: 40 },
-    village: { x0: 6, y0: 68, x1: 44, y1: 104 },
-  })) {
+  assert.equal(MAP_W, 200);
+  assert.equal(MAP_H, 200);
+  for (const [name, z] of Object.entries(ZONES)) {
     assert.ok(z.x0 >= 0 && z.y0 >= 0, name);
     assert.ok(z.x1 < MAP_W && z.y1 < MAP_H, name);
   }
@@ -126,8 +122,8 @@ test("map: архетипы лагерей не выходят за зону с�
     for (const [ox, oy] of layout.guardSpots) {
       const x = WAGON_BASE.x + ox;
       const y = WAGON_BASE.y + oy;
-      assert.ok(x > 92 && x < 110, `${id}: страж за зоной лагеря по x (${x})`);
-      assert.ok(y > 18 && y < 40, `${id}: страж за зоной лагеря по y (${y})`);
+      assert.ok(x > ZONES.CAMP.x0 && x < ZONES.CAMP.x1, `${id}: страж за зоной лагеря по x (${x})`);
+      assert.ok(y > ZONES.CAMP.y0 && y < ZONES.CAMP.y1, `${id}: страж за зоной лагеря по y (${y})`);
     }
   }
 });

@@ -216,6 +216,87 @@ function plasterTexture() {
   }, 71);
 }
 
+// ── Готический собор: тёсаный камень с высокими стрельчатыми окнами ──
+// Обычный камень не годится: он читается как сарай. Здесь крупные блоки,
+// витраж со свинцовыми переплётами и вертикальные рёбра.
+function gothicTexture() {
+  return makeTexture((x, y) => {
+    // Стрельчатое окно: узкое, с заострённым верхом.
+    const winCol = x % 32;
+    const inWinX = winCol >= 10 && winCol < 22;
+    // Верх окна — арка: чем ближе к краю, тем ниже начинается стекло.
+    const arch = Math.abs(winCol - 16) / 6;
+    const winTop = 8 + arch * arch * 10;
+    if (inWinX && y > winTop && y < 50) {
+      const localY = Math.floor(y - winTop);
+      // свинцовый переплёт: сетка 6×8
+      const lead = (x % 4 === 0) || (localY % 7 === 0);
+      if (lead) return [30, 30, 38];
+      // витраж: синий, багровый, золотой по вертикальным полосам
+      const band = Math.floor((x - 10) / 4) % 3;
+      const n = rand2(x, y, 121) * 22 - 11;
+      if (band === 0) return [42 + n, 58 + n, 118 + n];
+      if (band === 1) return [118 + n, 42 + n, 58 + n];
+      return [138 + n, 112 + n, 44 + n];
+    }
+    // Проём окна: тёмная ниша вокруг стекла.
+    if (inWinX && y > winTop - 3 && y < 53) return [38, 36, 40];
+
+    // Каменная кладка: крупные блоки 16×10.
+    const row = (y / 10) | 0;
+    const offset = (row & 1) * 8;
+    const bx = (x + offset) % 16;
+    const by = y % 10;
+    const n = rand2(x, y, 122) * 14 - 7;
+    if (bx === 0 || by === 0) {
+      const m = rand2(x, y, 123) * 10 - 5;
+      return [72 + m, 70 + m, 64 + m];
+    }
+    // Вертикальные рёбра — готическая тяга.
+    if (x % 32 < 2) return [86 + n, 84 + n, 78 + n];
+    const block = rand2((x + offset) / 16 | 0, row, 124);
+    const base = 118 + block * 28 + n;
+    return [base, base * 0.98, base * 0.9];
+  }, 120);
+}
+
+// ── Замковая кладка для ратуши: тёсаный камень с узкими бойницами ──
+function castleTexture() {
+  return makeTexture((x, y) => {
+    // Бойница: узкая вертикальная щель, редко — по одной на тайл.
+    const winCol = x % 64;
+    if (winCol >= 28 && winCol < 34 && y > 18 && y < 46) {
+      return [22, 20, 24];
+    }
+    const row = (y / 9) | 0;
+    const offset = (row & 1) * 9;
+    const bx = (x + offset) % 18;
+    const by = y % 9;
+    const n = rand2(x, y, 131) * 12 - 6;
+    if (bx === 0 || by === 0) {
+      const m = rand2(x, y, 132) * 8 - 4;
+      return [66 + m, 62 + m, 54 + m];
+    }
+    const block = rand2((x + offset) / 18 | 0, row, 133);
+    // Тёплый песчаник, не серый бетон.
+    const base = 126 + block * 24 + n;
+    return [base, base * 0.86, base * 0.66];
+  }, 130);
+}
+
+// ── Пол собора: плиты с тёмными швами ──
+function cathedralFloorTexture() {
+  return makeTexture((x, y) => {
+    const px = x % 16;
+    const py = y % 16;
+    const n = rand2(x, y, 141) * 10 - 5;
+    if (px < 2 || py < 2) return [44 + n * 0.5, 42 + n * 0.5, 38 + n * 0.5];
+    const tile = rand2((x / 16) | 0, (y / 16) | 0, 142);
+    const base = 88 + tile * 22 + n;
+    return [base, base * 0.97, base * 0.92];
+  }, 140);
+}
+
 // Булыжник: круглая мостовая, темнее обычной дороги.
 function cobbleTexture() {
   return makeTexture((x, y) => {
@@ -339,6 +420,9 @@ export function buildTextures() {
       brick_window: withBaseShadow(brickWindowTexture()),
       plaster_window: withBaseShadow(plasterWindowTexture()),
       wood_window: withBaseShadow(woodWindowTexture()),
+      // Готика и замковая кладка для собора и ратуши.
+      gothic: withBaseShadow(gothicTexture()),
+      castle: withBaseShadow(castleTexture()),
       // Новые материалы для разнообразия фасадов и сараев.
       plaster: withBaseShadow(plasterTexture()),
       thatch: withBaseShadow(thatchTexture(), TEX_SIZE, 0.22),
@@ -351,6 +435,7 @@ export function buildTextures() {
       // Вода — пол, а не стена: рисуется в floor casting.
       8: waterTexture(),
       cobble: cobbleTexture(),
+      cathedral: cathedralFloorTexture(),
     },
   };
 }

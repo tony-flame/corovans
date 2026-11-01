@@ -249,6 +249,128 @@ export function buildSprites() {
       rect(ctx, 36, 52, 4, 3, "#c9a24a");
     }),
 
+    // ── Священник: тёмная ряса, посох, молитвенник ──
+    priest: make(48, 88, (ctx) => {
+      rect(ctx, 17, 74, 8, 12, "#1a1a1e");
+      rect(ctx, 25, 74, 8, 12, "#1a1a1e");
+      // ряса
+      ctx.fillStyle = "#241f2e";
+      ctx.beginPath();
+      ctx.moveTo(24, 26);
+      ctx.lineTo(38, 80);
+      ctx.lineTo(10, 80);
+      ctx.closePath();
+      ctx.fill();
+      // столы рясы — светлые полосы
+      rect(ctx, 16, 40, 16, 2, "#3a3348");
+      rect(ctx, 14, 58, 20, 2, "#3a3348");
+      // руки с молитвенником
+      rect(ctx, 12, 46, 5, 16, "#c9a882");
+      rect(ctx, 32, 46, 5, 16, "#c9a882");
+      rect(ctx, 18, 56, 13, 10, "#4a2028");
+      rect(ctx, 19, 57, 11, 8, "#d7cbb0");
+      rect(ctx, 24, 57, 1, 8, "#b8a888");
+      // голова
+      ellipse(ctx, 24, 22, 8, 9, "#c9a07a");
+      // тонзура
+      ellipse(ctx, 24, 15, 6, 5, "#c9a07a");
+      ellipse(ctx, 24, 14, 4, 3, "#b88f68");
+      // глаза
+      rect(ctx, 21, 23, 2, 2, "#2a1d16");
+      rect(ctx, 26, 23, 2, 2, "#2a1d16");
+      // посох с крестом
+      rect(ctx, 40, 30, 2, 56, "#5b4127");
+      rect(ctx, 37, 28, 8, 2, "#8a6a3a");
+      rect(ctx, 39, 22, 2, 8, "#c9a24a");
+      // чётки
+      ellipse(ctx, 13, 48, 4, 4, "#3a3348");
+    }),
+
+    // ── Рыночный торговец: фартук, лоток, монеты ──
+    market_trader: make(50, 86, (ctx) => {
+      rect(ctx, 15, 76, 8, 10, "#3a2a1e");
+      rect(ctx, 27, 76, 8, 10, "#3a2a1e");
+      // кафтан
+      ctx.fillStyle = "#6a4a26";
+      ctx.beginPath();
+      ctx.moveTo(25, 28);
+      ctx.lineTo(39, 78);
+      ctx.lineTo(11, 78);
+      ctx.closePath();
+      ctx.fill();
+      // фартук
+      rect(ctx, 17, 46, 16, 30, "#a08a62");
+      rect(ctx, 17, 46, 16, 2, "#8a7450");
+      // руки
+      rect(ctx, 11, 46, 5, 16, "#c9a882");
+      rect(ctx, 34, 46, 5, 16, "#c9a882");
+      // голова
+      ellipse(ctx, 25, 22, 8, 9, "#c9a07a");
+      rect(ctx, 22, 23, 2, 2, "#2a1d16");
+      rect(ctx, 28, 23, 2, 2, "#2a1d16");
+      // усы
+      rect(ctx, 21, 27, 9, 2, "#3a2a1e");
+      // шапка
+      rect(ctx, 16, 13, 18, 6, "#3a2a1e");
+      rect(ctx, 14, 17, 22, 3, "#4a3626");
+      // монета в руке
+      ellipse(ctx, 36, 62, 3, 3, "#c9a24a");
+    }),
+
+    // ── Стражник ратуши: кираса, алебарда, тяжёлый плащ ──
+    throne_guard: make(52, 92, (ctx) => {
+      rect(ctx, 17, 78, 8, 12, "#22242a");
+      rect(ctx, 27, 78, 8, 12, "#22242a");
+      // плащ
+      ctx.fillStyle = "#2a1e2e";
+      ctx.beginPath();
+      ctx.moveTo(26, 26);
+      ctx.lineTo(44, 82);
+      ctx.lineTo(8, 82);
+      ctx.closePath();
+      ctx.fill();
+      // кираса
+      rect(ctx, 15, 34, 22, 26, "#5a6068");
+      rect(ctx, 15, 34, 22, 3, "#767c86");
+      rect(ctx, 18, 40, 16, 2, "#767c86");
+      rect(ctx, 18, 50, 16, 2, "#767c86");
+      // наплечники
+      ellipse(ctx, 14, 36, 7, 6, "#6a7078");
+      ellipse(ctx, 38, 36, 7, 6, "#6a7078");
+      // руки
+      rect(ctx, 10, 40, 5, 20, "#5a6068");
+      rect(ctx, 37, 40, 5, 20, "#5a6068");
+      // шлем
+      ellipse(ctx, 26, 20, 9, 10, "#6a7078");
+      rect(ctx, 17, 20, 18, 6, "#7a808a");
+      rect(ctx, 22, 22, 8, 2, "#1a1c20");
+      // плюмаж
+      rect(ctx, 25, 6, 3, 8, "#7a1f1f");
+      // алебарда
+      rect(ctx, 44, 12, 3, 76, "#4a3a26");
+      ctx.strokeStyle = "#8a9098";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(45, 12);
+      ctx.lineTo(45, 32);
+      ctx.stroke();
+      ctx.fillStyle = "#9aa0a8";
+      ctx.beginPath();
+      ctx.moveTo(45, 12);
+      ctx.lineTo(52, 20);
+      ctx.lineTo(45, 28);
+      ctx.closePath();
+      ctx.fill();
+      // наконечник снизу
+      ctx.fillStyle = "#8a9098";
+      ctx.beginPath();
+      ctx.moveTo(45, 88);
+      ctx.lineTo(48, 80);
+      ctx.lineTo(42, 80);
+      ctx.closePath();
+      ctx.fill();
+    }),
+
     wagon: make(112, 78, (ctx) => {
       // колеса
       for (const wx of [24, 86]) {
@@ -1040,6 +1162,105 @@ export function buildSprites() {
       const blobs = [[18, 32, 14, 12], [36, 30, 16, 13], [27, 22, 15, 12]];
       for (const [x, y, rx, ry] of blobs) ellipse(ctx, x, y, rx, ry, "#2c4a22");
       for (const [x, y, rx, ry] of blobs) ellipse(ctx, x - 2, y - 3, rx * 0.65, ry * 0.65, "#3d632d");
+    }),
+
+    // ── Кладбище у собора ──
+    tombstone: make(40, 52, (ctx) => {
+      // могильный холмик
+      ellipse(ctx, 20, 48, 17, 5, "#3a3428");
+      // плита со скруглённым верхом
+      ctx.fillStyle = "#6e6a60";
+      ctx.beginPath();
+      ctx.moveTo(9, 48);
+      ctx.lineTo(9, 20);
+      ctx.arc(20, 20, 11, Math.PI, 0);
+      ctx.lineTo(31, 48);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 9, 20, 22, 3, "#7f7b70");
+      // трещина и мох
+      ctx.strokeStyle = "#4e4a42";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(16, 26);
+      ctx.lineTo(19, 33);
+      ctx.lineTo(17, 40);
+      ctx.stroke();
+      ellipse(ctx, 26, 44, 5, 3, "#3f4a2e");
+      // крест
+      rect(ctx, 19, 12, 2, 9, "#5e5a52");
+      rect(ctx, 16, 15, 8, 2, "#5e5a52");
+    }),
+
+    // ── Фонарь: столб с горящим фонарём ──
+    lamp: make(32, 108, (ctx) => {
+      // столб
+      rect(ctx, 14, 42, 4, 62, "#2a2620");
+      rect(ctx, 13, 42, 6, 3, "#3a342c");
+      ellipse(ctx, 16, 104, 7, 3, "#2a2620");
+      // корпус фонаря
+      rect(ctx, 8, 24, 16, 20, "#3a3428");
+      rect(ctx, 10, 26, 12, 16, "#c9a24a");
+      rect(ctx, 15, 26, 2, 16, "#3a3428");
+      rect(ctx, 10, 33, 12, 2, "#3a3428");
+      // огонь — плотное ядро, без полупрозрачного ореола:
+      // альфа в спрайтах не сохраняется и ореол превращался в белый столб.
+      ellipse(ctx, 16, 34, 3, 4, "#ffe9a0");
+      ellipse(ctx, 16, 35, 1.5, 2.5, "#ffffff");
+      // крышка
+      ctx.fillStyle = "#2e2a22";
+      ctx.beginPath();
+      ctx.moveTo(6, 24);
+      ctx.lineTo(16, 14);
+      ctx.lineTo(26, 24);
+      ctx.closePath();
+      ctx.fill();
+    }),
+
+    // ── Скамья ──
+    bench: make(64, 34, (ctx) => {
+      rect(ctx, 4, 14, 56, 4, "#6a5236");   // сиденье
+      rect(ctx, 4, 6, 56, 3, "#6a5236");    // спинка
+      rect(ctx, 6, 9, 3, 6, "#5a442c");
+      rect(ctx, 55, 9, 3, 6, "#5a442c");
+      rect(ctx, 6, 18, 3, 12, "#5a442c");   // ножки
+      rect(ctx, 55, 18, 3, 12, "#5a442c");
+      rect(ctx, 4, 15, 56, 1, "#7d6244");
+    }),
+
+    // ── Знамя на древке ──
+    banner: make(48, 130, (ctx) => {
+      // древко
+      rect(ctx, 22, 6, 4, 122, "#4a3a26");
+      ellipse(ctx, 24, 127, 6, 3, "#3a2c1c");
+      // полотнище с вырезом снизу
+      ctx.fillStyle = "#7a1f1f";
+      ctx.beginPath();
+      ctx.moveTo(14, 12);
+      ctx.lineTo(34, 12);
+      ctx.lineTo(34, 84);
+      ctx.lineTo(24, 74);
+      ctx.lineTo(14, 84);
+      ctx.closePath();
+      ctx.fill();
+      // золотая кайма
+      ctx.strokeStyle = "#c9a24a";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // герб: башня
+      rect(ctx, 20, 40, 8, 18, "#c9a24a");
+      rect(ctx, 20, 36, 2, 4, "#c9a24a");
+      rect(ctx, 23, 36, 2, 4, "#c9a24a");
+      rect(ctx, 26, 36, 2, 4, "#c9a24a");
+      rect(ctx, 23, 46, 2, 5, "#5a1414");
+      // наконечник
+      ctx.fillStyle = "#c9a24a";
+      ctx.beginPath();
+      ctx.moveTo(24, 0);
+      ctx.lineTo(29, 8);
+      ctx.lineTo(19, 8);
+      ctx.closePath();
+      ctx.fill();
     }),
   };
 }

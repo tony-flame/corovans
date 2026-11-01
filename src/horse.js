@@ -74,9 +74,9 @@ export function mountedDamage(damage) {
 
 // Позиции лошадей в мире: конюшня и (опционально) личная у спавна.
 export function horseSpawns(bonuses = {}) {
-  const list = [{ x: 76.5, y: 88.5, id: "stable", personal: false }];
+  const list = [{ x: 116.5, y: 128.5, id: "stable", personal: false }];
   if (bonuses.fastTravel) {
-    list.push({ x: 15.5, y: 96.5, id: "personal", personal: true });
+    list.push({ x: 55.5, y: 136.5, id: "personal", personal: true });
   }
   return list;
 }

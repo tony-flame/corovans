@@ -280,10 +280,10 @@ test("run: потеря при смерти округляется вверх, �
 
 test("run: позиция восстанавливается только на проходимой клетке", () => {
   const world = createWorld();
-  const spawn = { x: 12.5, y: 92.5 };
+  const spawn = { x: 52.5, y: 132.5 };
 
   assert.equal(playerPositionValid(world, spawn), true, "спавн проходим");
-  assert.equal(playerPositionValid(world, { x: 11, y: 72 }), false, "внутри дома стоять нельзя");
+  assert.equal(playerPositionValid(world, { x: 51, y: 112 }), false, "внутри дома стоять нельзя");
   assert.equal(playerPositionValid(world, { x: 0.5, y: 0.5 }), false, "за границей мира");
   assert.equal(playerPositionValid(world, null), false);
   assert.equal(playerPositionValid(world, { x: NaN, y: 5 }), false);

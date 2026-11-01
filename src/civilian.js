@@ -79,6 +79,37 @@ export const CIVILIAN_DEFS = {
       "«Ты не первый, кто спрашивает про стойбище. Наверное, не последний.»",
     ],
   },
+  priest: {
+    label: "Священник",
+    sprite: "priest",
+    speed: 0,
+    lines: [
+      "«Собор стоит дольше, чем вся эта деревня. И переживёт её.»",
+      "«Ты пришёл с мечом в дом молитвы. Не самое худшее, что я видел.»",
+      "«Отпущение стоит дешевле, чем ты думаешь. Но и оно не бесплатно.»",
+    ],
+  },
+  market_trader: {
+    label: "Рыночный торговец",
+    sprite: "market_trader",
+    speed: 0.4,
+    trader: true,
+    lines: [
+      "«С ярмарки? Здесь всё вдвое дороже, чем у Мардо, зато свежее.»",
+      "«Товар не ворованный, если ты об этом. Почти.»",
+      "«Рынок держится на том, что все врут одинаково.»",
+    ],
+  },
+  throne_guard: {
+    label: "Стражник ратуши",
+    sprite: "throne_guard",
+    speed: 0,
+    lines: [
+      "«Ратуша закрыта. Для всех, кроме тех, кому можно.»",
+      "«Проходи мимо, пока я добрый. Добрый я недолго.»",
+      "«Зубцы на башне — не для красоты. Проверять не советую.»",
+    ],
+  },
 };
 
 export const CIVILIAN_ORDER = [
@@ -88,16 +119,24 @@ export const CIVILIAN_ORDER = [
   "drunk",
   "beggar",
   "traveler",
+  "priest",
+  "market_trader",
+  "throne_guard",
 ];
 
 // Точки расстановки: вне маршрута к Мардо, чтобы не запирать проход.
+// Деревенские — со сдвигом +40, новые кварталы — в абсолютных координатах.
 export const CIVILIAN_SPOTS = [
-  { kind: "peasant_w", x: 16.5, y: 89.5, path: [[16.5, 89.5], [20.5, 89.5]] },
-  { kind: "peasant_m", x: 31.5, y: 91.5, path: [[31.5, 91.5], [31.5, 96.5]] },
-  { kind: "greengrocer", x: 14.2, y: 97.6, path: null },
-  { kind: "drunk", x: 57.4, y: 79.6, path: null },
-  { kind: "beggar", x: 9.6, y: 95.4, path: null },
-  { kind: "traveler", x: 48.5, y: 86.9, path: [[48.5, 86.9], [72.5, 86.9]] },
+  { kind: "peasant_w", x: 56.5, y: 129.5, path: [[56.5, 129.5], [60.5, 129.5]] },
+  { kind: "peasant_m", x: 71.5, y: 131.5, path: [[71.5, 131.5], [71.5, 136.5]] },
+  { kind: "greengrocer", x: 54.2, y: 137.6, path: null },
+  { kind: "drunk", x: 97.4, y: 119.6, path: null },
+  { kind: "beggar", x: 49.6, y: 135.4, path: null },
+  { kind: "traveler", x: 88.5, y: 126.9, path: [[88.5, 126.9], [112.5, 126.9]] },
+  // Новые: рынок, собор, ратуша.
+  { kind: "market_trader", x: 107.5, y: 134.5, path: null },
+  { kind: "priest", x: 162.5, y: 104.5, path: null },
+  { kind: "throne_guard", x: 154.5, y: 55.5, path: null },
 ];
 
 export function createCivilian(kind, x, y, path = null, seed = 0) {

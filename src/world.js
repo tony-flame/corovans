@@ -18,33 +18,44 @@ export const TILE = {
   WATER: 8,
 };
 
-export const MAP_W = 120;
-export const MAP_H = 120;
+export const MAP_W = 200;
+export const MAP_H = 200;
 
-// ── Зоны мира ───────────────────────────────────────────────────────
+// ── Зоны мира (карта 200×200) ────────────────────────────────────────
+// Все зоны заданы в АБСОЛЮТНЫХ координатах карты. Деревенская застройка
+// внутри createWorld() по-прежнему пишется старыми координатами и
+// сдвигается на +40 — так проверенные места деревни остались на месте.
 export const ZONES = {
-  VILLAGE: { x0: 6, y0: 68, x1: 44, y1: 104 },
-  SQUARE: { x0: 14, y0: 84, x1: 30, y1: 92 },
-  ROAD_EAST: { y0: 86, y1: 87, x0: 4, x1: 104 },
-  TURN_NORTH: { x0: 98, y0: 26, x1: 99, y1: 86 },
-  CAMP: { x0: 92, y0: 18, x1: 110, y1: 40 },
-  FIELDS: { x0: 46, y0: 70, x1: 90, y1: 100 },
-  RUINS: { x0: 60, y0: 40, x1: 70, y1: 50 },
-  FOREST: { x0: 30, y0: 20, x1: 60, y1: 60 },
+  // Старый город: плотная застройка вокруг площади.
+  VILLAGE: { x0: 46, y0: 108, x1: 84, y1: 144 },
+  SQUARE: { x0: 54, y0: 124, x1: 70, y1: 132 },
+  // Большой тракт на восток и поворот на север, к стойбищу.
+  ROAD_EAST: { y0: 126, y1: 127, x0: 44, x1: 141 },
+  TURN_NORTH: { x0: 138, y0: 66, x1: 139, y1: 126 },
+  CAMP: { x0: 132, y0: 58, x1: 150, y1: 80 },
+  FIELDS: { x0: 86, y0: 104, x1: 130, y1: 124 },
+  RUINS: { x0: 100, y0: 80, x1: 110, y1: 90 },
+  FOREST: { x0: 70, y0: 60, x1: 100, y1: 100 },
+  // Новые крупные объекты.
+  // Часовня (88..98, 132..144) и рынок разведены: рынок восточнее.
+  CATHEDRAL: { x0: 152, y0: 96, x1: 182, y1: 140 },
+  RATHOUSE: { x0: 152, y0: 56, x1: 176, y1: 84 },
+  HOVELS: { x0: 92, y0: 152, x1: 124, y1: 184 },
+  MARKET: { x0: 104, y0: 130, x1: 128, y1: 148 },
 };
 
-export const SPAWN = { x: 12.5, y: 92.5 };
-export const MERCHANT_POS = { x: 20.5, y: 90.5 };
-export const COURTESAN_POS = { x: 26.5, y: 79.5 };
+export const SPAWN = { x: 52.5, y: 132.5 };
+export const MERCHANT_POS = { x: 60.5, y: 130.5 };
+export const COURTESAN_POS = { x: 66.5, y: 119.5 };
 
 // Четыре куртизанки в разных местах. Ключ места — то, чем запоминается дружба.
 export const COURTESAN_SPOTS_POS = {
-  square: { x: 26.5, y: 79.5 },
-  inn: { x: 60.5, y: 79.6 },
-  forest: { x: 46.5, y: 52.5 },
-  camp: { x: 95.5, y: 31.5 },
+  square: { x: 66.5, y: 119.5 },
+  inn: { x: 100.5, y: 119.6 },
+  forest: { x: 86.5, y: 92.5 },
+  camp: { x: 135.5, y: 71.5 },
 };
-export const WAGON_BASE = { x: 102.4, y: 28.1 };
+export const WAGON_BASE = { x: 142.4, y: 68.1 };
 
 let nextActorId = 1;
 
@@ -64,6 +75,11 @@ export function isWallTile(t) {
 // Вода: пройти нельзя, но и стеной не является — она низкая и видно сквозь.
 export function isWaterTile(t) {
   return t === TILE.WATER;
+}
+
+// Дорога: по ней нельзя ставить деревья и кусты, иначе лес перегородит тракт.
+export function isRoadTile(t) {
+  return t === TILE.ROAD || t === TILE.DIRT;
 }
 
 // Раскладки стоянки по архетипам (смещения от WAGON_BASE внутри зоны лагеря).
@@ -128,6 +144,11 @@ const CAMP_ORIGIN = { x: WAGON_BASE.x, y: WAGON_BASE.y };
 export function createWorld() {
   const map = new Uint8Array(MAP_W * MAP_H).fill(TILE.GRASS);
 
+  // Старая карта была 120×120. Вся застройка деревни сдвинута на +40 по
+  // обеим осям: так проверенные координаты остаются валидными, а вокруг
+  // появляется место под собор, ратушу и хижины.
+  const V = 40;
+
   const setTile = (x, y, t) => {
     const cx = Math.floor(x);
     const cy = Math.floor(y);
@@ -139,11 +160,13 @@ export function createWorld() {
     if (cx < 0 || cy < 0 || cx >= MAP_W || cy >= MAP_H) return TILE.STONE;
     return map[cy * MAP_W + cx];
   };
-  const fillRect = (x0, y0, x1, y1, t) => {
+  const fillAbs = (x0, y0, x1, y1, t) => {
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) setTile(x, y, t);
     }
   };
+  // Деревенские координаты — со сдвигом.
+  const fillRect = (x0, y0, x1, y1, t) => fillAbs(x0 + V, y0 + V, x1 + V, y1 + V, t);
   // Открытая коробка: стены по периметру и проём с одной стороны.
   const hollowRect = (x0, y0, x1, y1, t, gate) => {
     fillRect(x0, y0, x1, y1, t);
@@ -153,12 +176,39 @@ export function createWorld() {
     else if (gate === "west") fillRect(x0, Math.floor((y0 + y1) / 2), x0, Math.floor((y0 + y1) / 2), TILE.DIRT);
     else if (gate === "east") fillRect(x1, Math.floor((y0 + y1) / 2), x1, Math.floor((y0 + y1) / 2), TILE.DIRT);
   };
+  // То же, но в абсолютных координатах карты.
+  const hollowAbs = (x0, y0, x1, y1, t, gate) => {
+    fillAbs(x0, y0, x1, y1, t);
+    fillAbs(x0 + 1, y0 + 1, x1 - 1, y1 - 1, TILE.DIRT);
+    const mx = Math.floor((x0 + x1) / 2);
+    const my = Math.floor((y0 + y1) / 2);
+    if (gate === "south") fillAbs(mx, y1, mx, y1, TILE.DIRT);
+    else if (gate === "north") fillAbs(mx, y0, mx, y0, TILE.DIRT);
+    else if (gate === "west") fillAbs(x0, my, x0, my, TILE.DIRT);
+    else if (gate === "east") fillAbs(x1, my, x1, my, TILE.DIRT);
+  };
 
   // Дом с окнами: сплошной блок, но фасады получают оконную текстуру.
   // windowed — какой стороне дать окна: "s" (юг), "n", "e", "w" или массив.
   const addWalls = new Map();
   const house = (x0, y0, x1, y1, t, windowed = "s") => {
     fillRect(x0, y0, x1, y1, t);
+    const sides = Array.isArray(windowed) ? windowed : [windowed];
+    const windowTile = t === TILE.WOOD ? "wood_window"
+      : t === TILE.PLASTER_FRAME ? "plaster_window"
+      : "brick_window";
+
+    for (const side of sides) {
+      const setWin = (x, y) => addWalls.set(`${x + V},${y + V}`, windowTile);
+      if (side === "s") for (let x = x0 + 1; x < x1; x += 2) setWin(x, y1);
+      else if (side === "n") for (let x = x0 + 1; x < x1; x += 2) setWin(x, y0);
+      else if (side === "w") for (let y = y0 + 1; y < y1; y += 2) setWin(x0, y);
+      else if (side === "e") for (let y = y0 + 1; y < y1; y += 2) setWin(x1, y);
+    }
+  };
+  // Абсолютные координаты для новых крупных объектов.
+  const houseAbs = (x0, y0, x1, y1, t, windowed = "s") => {
+    fillAbs(x0, y0, x1, y1, t);
     const sides = Array.isArray(windowed) ? windowed : [windowed];
     const windowTile = t === TILE.WOOD ? "wood_window"
       : t === TILE.PLASTER_FRAME ? "plaster_window"
@@ -174,43 +224,42 @@ export function createWorld() {
   };
 
   // ── Границы мира ──
-  fillRect(0, 0, MAP_W - 1, 0, TILE.STONE);
-  fillRect(0, MAP_H - 1, MAP_W - 1, MAP_H - 1, TILE.STONE);
-  fillRect(0, 0, 0, MAP_H - 1, TILE.STONE);
-  fillRect(MAP_W - 1, 0, MAP_W - 1, MAP_H - 1, TILE.STONE);
+  fillAbs(0, 0, MAP_W - 1, 0, TILE.STONE);
+  fillAbs(0, MAP_H - 1, MAP_W - 1, MAP_H - 1, TILE.STONE);
+  fillAbs(0, 0, 0, MAP_H - 1, TILE.STONE);
+  fillAbs(MAP_W - 1, 0, MAP_W - 1, MAP_H - 1, TILE.STONE);
 
   // ── Тракт на восток и поворот на север ──
-  fillRect(ZONES.ROAD_EAST.x0, ZONES.ROAD_EAST.y0, ZONES.ROAD_EAST.x1, ZONES.ROAD_EAST.y1, TILE.ROAD);
-  fillRect(ZONES.TURN_NORTH.x0, ZONES.TURN_NORTH.y0, ZONES.TURN_NORTH.x1, ZONES.TURN_NORTH.y1, TILE.ROAD);
+  fillAbs(ZONES.ROAD_EAST.x0, ZONES.ROAD_EAST.y0, ZONES.ROAD_EAST.x1, ZONES.ROAD_EAST.y1, TILE.ROAD);
+  fillAbs(ZONES.TURN_NORTH.x0, ZONES.TURN_NORTH.y0, ZONES.TURN_NORTH.x1, ZONES.TURN_NORTH.y1, TILE.ROAD);
 
   // ── Деревня: улицы, площадь ──
   fillRect(8, 96, 40, 97, TILE.ROAD); // нижняя улица
   fillRect(8, 80, 40, 81, TILE.ROAD); // верхняя улица
   fillRect(18, 82, 19, 95, TILE.ROAD); // переулок
-  fillRect(ZONES.SQUARE.x0, ZONES.SQUARE.y0, ZONES.SQUARE.x1, ZONES.SQUARE.y1, TILE.DIRT);
+  fillAbs(ZONES.SQUARE.x0, ZONES.SQUARE.y0, ZONES.SQUARE.x1, ZONES.SQUARE.y1, TILE.DIRT);
 
   // ── Вода: озеро на юго-западе и река западнее леса ──
-  // Важно: вода НЕ должна пересекаться с домами и дорогами — поэтому
-  // озеро вынесено ниже деревни (y >= 108), а река идёт западнее леса.
+  // В деревенских координатах (со сдвигом V).
   for (let y = 108; y <= 116; y++) {
     for (let x = 4; x <= 22; x++) {
       const dx = (x - 13) / 8.5;
       const dy = (y - 112) / 4.5;
       const d = dx * dx + dy * dy;
       if (d < 0.85 + ((x * 7 + y * 13) % 5) * 0.05) {
-        setTile(x, y, TILE.WATER);
+        setTile(x + V, y + V, TILE.WATER);
       }
     }
   }
 
-  // Река: извилистая полоса с севера на юг, западнее леса (лес начинается с x=30).
+  // Река: извилистая полоса с севера на юг, западнее леса.
   let riverX = 24;
   for (let y = 30; y <= 62; y++) {
     riverX += ((y * 17) % 5) - 2;
     riverX = Math.max(21, Math.min(26, riverX));
-    setTile(riverX, y, TILE.WATER);
-    setTile(riverX + 1, y, TILE.WATER);
-    if (y % 7 === 0) setTile(riverX + 2, y, TILE.WATER);
+    setTile(riverX + V, y + V, TILE.WATER);
+    setTile(riverX + 1 + V, y + V, TILE.WATER);
+    if (y % 7 === 0) setTile(riverX + 2 + V, y + V, TILE.WATER);
   }
 
   // Река кончается севернее тракта, поэтому мост не нужен:
@@ -235,22 +284,17 @@ export function createWorld() {
   // Дворы: сараи (входимые) и заборы
   hollowRect(31, 84, 35, 88, TILE.WOOD, "south");
 
-  // ── Храм: крупное здание на востоке деревни, входимое ──
-  // Корпус 12×14 с нефом внутри и входом с запада.
-  fillRect(48, 92, 60, 106, TILE.STONE);
-  fillRect(49, 93, 59, 105, TILE.DIRT); // внутренний пол
-  // Вход: проём в западной стене
-  fillRect(48, 98, 48, 100, TILE.DIRT);
-  // Алтарь — выступ в восточной стене
-  fillRect(58, 97, 59, 101, TILE.STONE);
-  // ── Дворец/ратуша: северо-восток, входимый вестибюль ──
-  fillRect(72, 90, 92, 104, TILE.BRICK_FRAME);
-  fillRect(73, 91, 91, 103, TILE.DIRT);
-  // Вход с юга
-  fillRect(81, 103, 83, 103, TILE.DIRT);
-  // Колонны внутри вестибюля (пропы добавятся позже)
-  fillRect(78, 95, 78, 95, TILE.STONE);
-  fillRect(86, 95, 86, 95, TILE.STONE);
+  // ── Общественные здания в деревне ──
+  // Небольшая часовня 10×12, входимая с запада.
+  fillRect(48, 92, 58, 104, TILE.STONE);
+  fillRect(49, 93, 57, 103, TILE.DIRT);
+  fillRect(48, 97, 48, 99, TILE.DIRT);
+  fillRect(56, 96, 57, 100, TILE.STONE);
+
+  // Дом старосты: 14×10, входимый вестибюль.
+  fillRect(72, 90, 86, 100, TILE.BRICK_FRAME);
+  fillRect(73, 91, 85, 99, TILE.DIRT);
+  fillRect(79, 99, 81, 99, TILE.DIRT);
 
   // ── Таверна у тракта: входимая, со стойкой ──
   fillRect(66, 78, 74, 86, TILE.WOOD);
@@ -265,11 +309,140 @@ export function createWorld() {
   hollowRect(52, 92, 56, 96, TILE.WOOD, "north"); // сарай у дороги
 
   // ── Руины: входимые ──
-  hollowRect(ZONES.RUINS.x0, ZONES.RUINS.y0, ZONES.RUINS.x0 + 6, ZONES.RUINS.y0 + 6, TILE.STONE, "east");
+  hollowAbs(ZONES.RUINS.x0, ZONES.RUINS.y0, ZONES.RUINS.x0 + 6, ZONES.RUINS.y0 + 6, TILE.STONE, "east");
   hollowRect(76, 44, 81, 49, TILE.STONE, "south");
 
   // ── Стойбище ──
-  fillRect(ZONES.CAMP.x0, ZONES.CAMP.y0, ZONES.CAMP.x1, ZONES.CAMP.y1, TILE.DIRT);
+  fillAbs(ZONES.CAMP.x0, ZONES.CAMP.y0, ZONES.CAMP.x1, ZONES.CAMP.y1, TILE.DIRT);
+
+  // ── Улицы новых кварталов ──
+  // Без них собор, ратуша и квартал хижин стояли бы в глухой траве.
+  fillAbs(139, 116, 151, 118, TILE.ROAD);   // подъезд к западному порталу собора
+  fillAbs(138, 54, 165, 55, TILE.ROAD);     // к северным воротам ратуши
+  fillAbs(138, 55, 139, 66, TILE.ROAD);     // смычка с поворотом на север
+  fillAbs(100, 126, 101, 184, TILE.ROAD);   // улица квартала хижин (восточнее часовни)
+  fillAbs(100, 160, 122, 161, TILE.ROAD);   // поперечный переулок
+  fillAbs(150, 140, 183, 141, TILE.ROAD);   // обход собора с юга
+  // Рынок: подъезд от тракта и связка с улицей хижин.
+  fillAbs(104, 128, 105, 130, TILE.ROAD);
+  fillAbs(100, 148, 128, 149, TILE.ROAD);
+  fillAbs(127, 130, 128, 149, TILE.ROAD);
+
+  // ── Собор: готика, 30×44, две башни по фасаду ──
+  // Неф с контрфорсами и стрельчатыми окнами, вход с запада.
+  const CX0 = ZONES.CATHEDRAL.x0;
+  const CY0 = ZONES.CATHEDRAL.y0;
+  const CX1 = ZONES.CATHEDRAL.x1;
+  const CY1 = ZONES.CATHEDRAL.y1;
+
+  fillAbs(CX0, CY0, CX1, CY1, TILE.STONE);
+  // внутренний неф
+  fillAbs(CX0 + 4, CY0 + 4, CX1 - 4, CY1 - 4, TILE.DIRT);
+  // алтарь на востоке
+  fillAbs(CX1 - 6, CY0 + 17, CX1 - 4, CY0 + 25, TILE.STONE);
+
+  // Две башни по фасаду: выше за счёт отдельного материала и зубцов.
+  houseAbs(CX0, CY0 - 8, CX0 + 7, CY0 + 5, TILE.BRICK_FRAME, ["w", "n"]);
+  houseAbs(CX1 - 7, CY0 - 8, CX1, CY0 + 5, TILE.BRICK_FRAME, ["e", "n"]);
+  // контрфорсы по бокам нефа
+  for (let y = CY0 + 8; y < CY1 - 4; y += 6) {
+    fillAbs(CX0, y, CX0 + 1, y + 2, TILE.STONE);
+    fillAbs(CX1 - 1, y, CX1, y + 2, TILE.STONE);
+  }
+  // Портал режется ПОСЛЕ контрфорсов: иначе они замуровывают вход.
+  // Три тайла в ширину: семь превращали фасад в дыру.
+  fillAbs(CX0, CY0 + 19, CX0 + 4, CY0 + 21, TILE.DIRT);
+
+  // Высокие стены: рейкастер рисует все стены одной высоты, поэтому собор
+  // и ратуша выглядели бы забором. Верх стены растягивается множителем.
+  const tallTiles = new Map();
+  const markTall = (x0, y0, x1, y1, mul) => {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) tallTiles.set(`${x},${y}`, mul);
+    }
+  };
+  // Скины: собор — готический камень, ратуша — замковая кладка.
+  // Ключ тот же "x,y", значение — имя текстуры из textures.walls.
+  const skinTiles = new Map();
+  const skin = (x0, y0, x1, y1, name) => {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) skinTiles.set(`${x},${y}`, name);
+    }
+  };
+  // Собор: корпус 4.5, башни 9 — готика не бывает в три метра.
+  markTall(CX0, CY0, CX1, CY1, 4.5);
+  markTall(CX0, CY0 - 8, CX0 + 7, CY0 + 5, 9);
+  markTall(CX1 - 7, CY0 - 8, CX1, CY0 + 5, 9);
+  // Готический камень только на стены: пол и неф остаются полом.
+  for (let y = CY0 - 8; y <= CY1; y++) {
+    for (let x = CX0; x <= CX1; x++) {
+      if (isWallTile(getTile(x, y))) skinTiles.set(`${x},${y}`, "gothic");
+    }
+  }
+
+  // ── Ратуша: башня с зубцами, 24×28 ──
+  const RX0 = ZONES.RATHOUSE.x0;
+  const RY0 = ZONES.RATHOUSE.y0;
+  const RX1 = ZONES.RATHOUSE.x1;
+  const RY1 = ZONES.RATHOUSE.y1;
+
+  houseAbs(RX0, RY0, RX1, RY1, TILE.BRICK_FRAME, ["n", "e", "w"]);
+  // вестибюль
+  fillAbs(RX0 + 4, RY0 + 4, RX1 - 4, RY1 - 4, TILE.DIRT);
+  // вход с севера, к тракту: пробивает стену насквозь
+  fillAbs(RX0 + 11, RY0, RX0 + 13, RY0 + 4, TILE.DIRT);
+  // центральная башня — только по углам, чтобы не замуровать вестибюль
+  houseAbs(RX0 + 6, RY0 + 7, RX0 + 10, RY0 + 11, TILE.STONE, []);
+  houseAbs(RX1 - 10, RY0 + 7, RX1 - 6, RY0 + 11, TILE.STONE, []);
+  // зубцы по периметру: редкие выступы
+  for (let x = RX0; x <= RX1; x += 4) {
+    fillAbs(x, RY1, x + 1, RY1, TILE.STONE);
+    fillAbs(x, RY0, x + 1, RY0, TILE.STONE);
+  }
+  // обратно пробиваем ворота и вход: зубцы их перекрыли
+  fillAbs(RX0 + 11, RY0, RX0 + 13, RY0 + 4, TILE.DIRT);
+
+  // Ратуша: башня Тауэра — массивная, но ниже собора.
+  markTall(RX0, RY0, RX1, RY1, 3.2);
+  markTall(RX0 + 6, RY0 + 7, RX0 + 10, RY0 + 11, 5.5);
+  markTall(RX1 - 10, RY0 + 7, RX1 - 6, RY0 + 11, 5.5);
+  for (let y = RY0; y <= RY1; y++) {
+    for (let x = RX0; x <= RX1; x++) {
+      if (isWallTile(getTile(x, y))) skinTiles.set(`${x},${y}`, "castle");
+    }
+  }
+
+  // ── Квартал хижин: кривые улочки и лачуги ──
+  const HX0 = ZONES.HOVELS.x0;
+  const HY0 = ZONES.HOVELS.y0;
+  const HX1 = ZONES.HOVELS.x1;
+  const HY1 = ZONES.HOVELS.y1;
+  fillAbs(HX0, HY0, HX1, HY1, TILE.DIRT);
+  // Лачуги расставлены вручную: сеткой они либо сливались в забор,
+  // либо давали две штуки на весь квартал. Между домами — переулки.
+  // Материал и высота разные, иначе ряд одинаковых коробок читается
+  // как одна длинная стена.
+  const hovelBlocks = [
+    [96, 154], [104, 154], [114, 156],
+    [96, 168], [106, 168], [116, 170],
+    [104, 176], [114, 178],
+  ];
+  const hovelMats = [TILE.WOOD, TILE.PLASTER_FRAME, TILE.BRICK, TILE.WOOD];
+  for (let i = 0; i < hovelBlocks.length; i++) {
+    const [hx, hy] = hovelBlocks[i];
+    const w = 4 + (i % 2);
+    const h = 3 + (i % 3);
+    const mat = hovelMats[i % hovelMats.length];
+    fillAbs(hx, hy, hx + w, hy + h, mat);
+    // Низкие лачуги: чуть ниже обычного дома, каждая по-своему.
+    const lowH = 0.78 + (i % 3) * 0.08;
+    for (let y = hy; y <= hy + h; y++) {
+      for (let x = hx; x <= hx + w; x++) tallTiles.set(`${x},${y}`, lowH);
+    }
+  }
+
+  // ── Рынок между деревней и собором ──
+  fillAbs(ZONES.MARKET.x0, ZONES.MARKET.y0, ZONES.MARKET.x1, ZONES.MARKET.y1, TILE.DIRT);
 
   // Лес строится пропами ниже — старые «дырки в траве» убраны.
 
@@ -279,7 +452,18 @@ export function createWorld() {
   const windowTiles = addWalls;
 
   const props = [];
+  // Деревенские пропсы заданы в старых координатах — сдвигаем на V.
+  // Растительность на дороге отбрасывается: лес поверх тракта перекрывал путь.
+  const VEGETATION = new Set(["tree", "pine", "deadTree", "bush", "thorn", "hedge", "rock"]);
   const addProp = (sprite, x, y, r, scale, solid = true, blocksSight = false) => {
+    const ax = x + V;
+    const ay = y + V;
+    if (VEGETATION.has(sprite) && isRoadTile(getTile(ax, ay))) return;
+    props.push({ sprite, x: ax, y: ay, r, scale, solid, blocksSight });
+  };
+  // Абсолютные координаты — для собора, ратуши и прочего нового.
+  const addPropAbs = (sprite, x, y, r, scale, solid = true, blocksSight = false) => {
+    if (VEGETATION.has(sprite) && isRoadTile(getTile(x, y))) return;
     props.push({ sprite, x, y, r, scale, solid, blocksSight });
   };
 
@@ -307,6 +491,7 @@ export function createWorld() {
   const forestTrees = [];
 
   // 12 центров кластеров внутри зоны леса.
+  // Зона леса (70..100, 60..100) не должна залезать на рынок (104..128, 130..148).
   const clusters = [];
   for (let i = 0; i < 12; i++) {
     clusters.push({
@@ -319,8 +504,8 @@ export function createWorld() {
 
   for (let y = ZONES.FOREST.y0 + 1; y < ZONES.FOREST.y1; y += 0.9) {
     for (let x = ZONES.FOREST.x0 + 1; x < ZONES.FOREST.x1; x += 0.9) {
-      // Коридор к руинам всегда чист.
-      if (x > 46 && x < 51) continue;
+      // Коридор к руинам всегда чист (x ≈ 88-90).
+      if (x > 86 && x < 91) continue;
 
       // Насколько точка близка к какому-то кластеру.
       let best = 0;
@@ -344,7 +529,9 @@ export function createWorld() {
   }
 
   for (const [x, y, roll] of forestTrees) {
-    // Треть — ели, каждая седьмая — сухая: смешанный лес.
+    // Тракт и все новые улицы должны оставаться чистыми: дерево посреди
+    // дороги — это не атмосфера, это столб в лицо.
+    if (isRoadTile(getTile(x, y))) continue;
     const kind = roll > 0.86 ? "deadTree" : roll > 0.42 ? "pine" : "tree";
     addProp(kind, x, y, kind === "pine" ? 0.42 : 0.36, kind === "pine" ? 1.45 : 1.4, true, true);
   }
@@ -352,14 +539,14 @@ export function createWorld() {
   // ── Конюшня у корчмы ──
   addProp("stable", 76.5, 88.5, 0.9, 1.1, true, true);
 
-  // ── Пропы: храм, дворец, таверна ──
+  // ── Пропы: часовня, дом старосты, таверна ──
   addProp("altar", 57.5, 99, 0.45, 0.85, true, false);
-  // Колонны в храме
+  // Колонны в часовне
   addProp("pillar", 52.5, 96.5, 0.35, 1.4, true, true);
   addProp("pillar", 52.5, 102.5, 0.35, 1.4, true, true);
   addProp("pillar", 56.5, 96.5, 0.35, 1.4, true, true);
   addProp("pillar", 56.5, 102.5, 0.35, 1.4, true, true);
-  // Колонны дворца
+  // Колонны дома старосты
   addProp("pillar", 78.5, 95.5, 0.35, 1.5, true, true);
   addProp("pillar", 86.5, 95.5, 0.35, 1.5, true, true);
   addProp("throne", 82.5, 93.5, 0.5, 1.1, true, false);
@@ -368,14 +555,14 @@ export function createWorld() {
   addProp("barrel", 68.5, 84.2, 0.3, 0.55, true, false);
   addProp("barrel", 72.5, 84.2, 0.3, 0.55, true, false);
 
-  // ── Пропы: стоянка ──
-  addProp("wagon", WAGON_BASE.x, WAGON_BASE.y, 1.15, 0.95, true, true);
-  addProp("horse", WAGON_BASE.x + 2.8, WAGON_BASE.y - 1.2, 0.55, 0.85, true, true);
-  addProp("campfire", WAGON_BASE.x - 3.1, WAGON_BASE.y - 1.3, 0.32, 0.5, true, false);
-  addProp("crate", WAGON_BASE.x - 1.4, WAGON_BASE.y - 1.7, 0.36, 0.6, true, false);
-  addProp("crate", WAGON_BASE.x + 3.3, WAGON_BASE.y + 2.8, 0.36, 0.6, true, false);
-  addProp("barrel", WAGON_BASE.x - 3.0, WAGON_BASE.y + 1.8, 0.32, 0.55, true, false);
-  addProp("barrel", WAGON_BASE.x + 3.5, WAGON_BASE.y - 2.0, 0.32, 0.55, true, false);
+  // ── Пропсы: стоянка (абсолютные координаты) ──
+  addPropAbs("wagon", WAGON_BASE.x, WAGON_BASE.y, 1.15, 0.95, true, true);
+  addPropAbs("horse", WAGON_BASE.x + 2.8, WAGON_BASE.y - 1.2, 0.55, 0.85, true, true);
+  addPropAbs("campfire", WAGON_BASE.x - 3.1, WAGON_BASE.y - 1.3, 0.32, 0.5, true, false);
+  addPropAbs("crate", WAGON_BASE.x - 1.4, WAGON_BASE.y - 1.7, 0.36, 0.6, true, false);
+  addPropAbs("crate", WAGON_BASE.x + 3.3, WAGON_BASE.y + 2.8, 0.36, 0.6, true, false);
+  addPropAbs("barrel", WAGON_BASE.x - 3.0, WAGON_BASE.y + 1.8, 0.32, 0.55, true, false);
+  addPropAbs("barrel", WAGON_BASE.x + 3.5, WAGON_BASE.y - 2.0, 0.32, 0.55, true, false);
 
   // ── Пропы: деревня ──
   addProp("well", 22.2, 88.4, 0.5, 0.9, true, true);
@@ -406,27 +593,70 @@ export function createWorld() {
     // лес
     [32, 22], [40, 28], [48, 34], [36, 44], [44, 52], [52, 24],
     [30, 36], [54, 44], [58, 32], [46, 20], [34, 56], [56, 56],
-    // восток
-    [104, 60], [108, 46], [100, 44], [112, 32], [106, 22],
-    [86, 60], [92, 64], [80, 64],
   ];
   for (const [x, y] of trees) addProp("tree", x, y, 0.36, 1.5, true, true);
+
+  // ── Деревья у новых кварталов (абсолютные координаты) ──
+  const eastTrees = [
+    [146, 96], [186, 100], [186, 114], [184, 128], [186, 142],
+    [140, 148], [132, 152], [128, 168], [136, 180],
+    [184, 148], [150, 44], [130, 54], [126, 62],
+  ];
+  for (const [x, y] of eastTrees) addPropAbs("tree", x, y, 0.36, 1.5, true, true);
 
   const bushes = [
     [16, 88], [30, 86], [12, 78], [40, 82], [21, 72],
     [62, 82], [74, 86], [88, 78], [56, 68], [72, 68],
     [38, 30], [50, 40], [42, 50], [60, 52], [34, 48],
-    [96, 70], [104, 52], [100, 36], [110, 40],
   ];
   for (const [x, y] of bushes) addProp("bush", x, y, 0.32, 0.7, true, true);
 
   const rocks = [
     [14, 104], [36, 104], [44, 92], [66, 66], [90, 80],
     [62, 46], [78, 48], [68, 42], [74, 52],
-    [102, 50], [110, 28], [96, 34], [104, 18],
     [26, 64], [50, 62],
   ];
   for (const [x, y] of rocks) addProp("rock", x, y, 0.48, 0.65, true, true);
+
+  // ── Пропсы новых кварталов ──
+  // Собор: надгробия, фонари, коновязь у портала.
+  for (let i = 0; i < 6; i++) {
+    addPropAbs("tombstone", 154 + i * 5, 94, 0.3, 0.55, true, false);
+  }
+  addPropAbs("lamp", 147.5, 114, 0.2, 0.9, true, false);
+  addPropAbs("lamp", 152.5, 122, 0.2, 0.9, true, false);
+  addPropAbs("bench", 146.5, 120, 0.35, 0.6, true, false);
+  addPropAbs("bench", 146.5, 112, 0.35, 0.6, true, false);
+
+  // Ратуша: стража, знамёна, коновязь.
+  addPropAbs("banner", 154.5, 58, 0.3, 1.2, true, false);
+  addPropAbs("banner", 174.5, 58, 0.3, 1.2, true, false);
+  addPropAbs("bench", 152.5, 56.5, 0.35, 0.6, true, false);
+  addPropAbs("well", 145.5, 60.5, 0.5, 0.9, true, true);
+
+  // Рынок: прилавки, корзины, бочки — плотнее, чтобы площадь не была пустой.
+  // Часовня занимает 88..98 по x, поэтому рынок начинается с 104.
+  addPropAbs("counter", 108.5, 132.5, 0.55, 0.7, true, false);
+  addPropAbs("counter", 108.5, 137.5, 0.55, 0.7, true, false);
+  addPropAbs("counter", 116.5, 134.5, 0.55, 0.7, true, false);
+  addPropAbs("counter", 122.5, 139.5, 0.55, 0.7, true, false);
+  addPropAbs("basket", 106.5, 135.5, 0.2, 0.4, true, false);
+  addPropAbs("basket", 110.5, 140.5, 0.2, 0.4, true, false);
+  addPropAbs("basket", 114.5, 132.5, 0.2, 0.4, true, false);
+  addPropAbs("barrel", 106.5, 141.5, 0.3, 0.55, true, false);
+  addPropAbs("barrel", 120.5, 136.5, 0.3, 0.55, true, false);
+  addPropAbs("barrel", 124.5, 142.5, 0.3, 0.55, true, false);
+  addPropAbs("lamp", 112.5, 130.5, 0.2, 0.9, true, false);
+  addPropAbs("lamp", 122.5, 146.5, 0.2, 0.9, true, false);
+
+  // Квартал хижин: колодцы, заборы, костры.
+  addPropAbs("well", 104.5, 166.5, 0.5, 0.9, true, true);
+  addPropAbs("haystack", 110.5, 155.5, 0.55, 0.9, true, true);
+  addPropAbs("haystack", 118.5, 170.5, 0.55, 0.9, true, true);
+  addPropAbs("sign", 103.5, 150.5, 0.22, 0.8, true, false);
+  addPropAbs("thorn", 108.5, 158.5, 0.34, 0.8, true, true);
+  addPropAbs("thorn", 116.5, 154.5, 0.34, 0.8, true, true);
+  addPropAbs("thorn", 120.5, 176.5, 0.34, 0.8, true, true);
 
   const actors = [];
 
@@ -438,17 +668,17 @@ export function createWorld() {
   });
   actors.push(merchant);
 
-  const villageGuard = makeActor("village_guard", 22.5, 94.5, {
+  const villageGuard = makeActor("village_guard", 22.5 + V, 94.5 + V, {
     hp: 70,
     maxHp: 70,
     damage: 10,
     speed: 2.2,
     viewRange: 9,
     patrol: [
-      { x: 22.5, y: 94.5 },
-      { x: 30.5, y: 94.5 },
-      { x: 30.5, y: 88.5 },
-      { x: 22.5, y: 88.5 },
+      { x: 22.5 + V, y: 94.5 + V },
+      { x: 30.5 + V, y: 94.5 + V },
+      { x: 30.5 + V, y: 88.5 + V },
+      { x: 22.5 + V, y: 88.5 + V },
     ],
   });
   actors.push(villageGuard);
@@ -494,6 +724,10 @@ export function createWorld() {
     horses: [],
     // Фасады с окнами: ключ "x,y" → имя текстуры стены.
     windowTiles,
+    // Высокие здания: ключ "x,y" → множитель высоты стены.
+    tallTiles,
+    // Скины зданий: ключ "x,y" → имя текстуры стены.
+    skinTiles,
     // Титан живёт отдельно от actors: spawnCamp его не трогает,
     // а диспетчер врагов не принимает его за стражника.
     titan: null,

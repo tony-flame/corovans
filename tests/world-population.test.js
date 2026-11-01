@@ -203,6 +203,19 @@ test("гражданские: роли распознаются", () => {
   assert.equal(isRumormonger(drunk), true);
 });
 
+test("гражданские: новые роли собора, рынка и ратуши", () => {
+  for (const kind of ["priest", "market_trader", "throne_guard"]) {
+    const c = createCivilian(kind, 1, 1, null, 1);
+    assert.ok(c, `${kind} не создаётся`);
+    assert.ok(CIVILIAN_DEFS[kind].lines.length >= 3, `${kind}: мало фраз`);
+    assert.equal(c.spriteKey, kind, `${kind}: спрайт не совпадает с видом`);
+  }
+  assert.equal(isTrader(createCivilian("market_trader", 1, 1, null, 1)), true);
+  // Священник и стражник ратуши не торгуют и не просят милостыню.
+  assert.equal(isTrader(createCivilian("priest", 1, 1, null, 1)), false);
+  assert.equal(isBeggar(createCivilian("throne_guard", 1, 1, null, 1)), false);
+});
+
 test("мир: четыре куртизанки на карте", () => {
   const world = createWorld();
   assert.equal(world.courtesans.length, 4);
