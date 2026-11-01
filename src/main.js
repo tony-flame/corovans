@@ -2,7 +2,8 @@ import { Renderer } from "./raycaster.js";
 import { Input } from "./input.js";
 import { Player } from "./player.js";
 import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand } from "./world.js";
-import { updateActors, maxSuspicion } from "./enemies.js";import { UI } from "./ui.js";
+import { updateActors, maxSuspicion } from "./enemies.js";
+import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
 import { addItem, totalValue, rollLoot } from "./inventory.js";
 import { purchase, fineFor, sellMultiplier } from "./economy.js";
@@ -90,7 +91,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-02-horse-1";
+const BUILD = "2026-11-02-cathedral-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
