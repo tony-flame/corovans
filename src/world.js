@@ -283,6 +283,9 @@ export function createWorld() {
     addProp(kind, x, y, kind === "pine" ? 0.42 : 0.36, kind === "pine" ? 1.45 : 1.4, true, true);
   }
 
+  // ── Конюшня у корчмы ──
+  addProp("stable", 76.5, 88.5, 0.9, 1.1, true, true);
+
   // ── Пропы: храм, дворец, таверна ──
   addProp("altar", 57.5, 99, 0.45, 0.85, true, false);
   // Колонны в храме
@@ -419,7 +422,10 @@ export function createWorld() {
     villageGuard,
     courtesan,
     courtesans,
+    merchants: undefined,
     civilians: [],
+    // Лошади: конюшенная и (по разблокировке) личная.
+    horses: [],
     // Титан живёт отдельно от actors: spawnCamp его не трогает,
     // а диспетчер врагов не принимает его за стражника.
     titan: null,
@@ -645,6 +651,15 @@ export function canStand(world, x, y, r, ignore = null) {
     const pr = (person.r || 0.3) * 0.85;
     if (dx * dx + dy * dy < (r + pr) * (r + pr)) return false;
   }
+
+  // Лошади блокируют, но чуть меньше своего визуального размера.
+  for (const horse of world.horses || []) {
+    if (!horse.alive) continue;
+    const dx = x - horse.x;
+    const dy = y - horse.y;
+    const hr = (horse.r || 0.55) * 0.8;
+    if (dx * dx + dy * dy < (r + hr) * (r + hr)) return false;
+  }
   return true;
 }
 
@@ -746,6 +761,19 @@ export function nearestInteraction(world, player) {
       y: c.y,
       radius: 1.9,
       label: `E — заговорить (${c.label})`,
+    });
+  }
+
+  // Лошади: сесть в седло.
+  for (const h of world.horses || []) {
+    if (!h.alive) continue;
+    candidates.push({
+      type: "horse",
+      horseId: h.id,
+      x: h.x,
+      y: h.y,
+      radius: 2.0,
+      label: `E — сесть на ${h.label.toLowerCase()}`,
     });
   }
 

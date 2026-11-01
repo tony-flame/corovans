@@ -115,7 +115,13 @@ export class Player {
     this.landedThisFrame = jumpStep.landed;
 
     this.crouching = CROUCH_KEYS.some((code) => input.isDown(code)) && this.jump.grounded;
-    this.blocking = input.isBlocking() && this.jump.grounded;
+    // Верхом приседать и блокировать нельзя — седло не позволяет.
+    if (state && state.mounted) {
+      this.crouching = false;
+      this.blocking = false;
+    } else {
+      this.blocking = input.isBlocking() && this.jump.grounded;
+    }
 
     const forward = (input.isDown("KeyW") ? 1 : 0) - (input.isDown("KeyS") ? 1 : 0);
     const strafe = (input.isDown("KeyD") ? 1 : 0) - (input.isDown("KeyA") ? 1 : 0);
@@ -127,7 +133,10 @@ export class Player {
 
     this.sprinting = wantsSprint && !this.crouching;
     const boots = state.upgrades.boots;
-    const speedMultiplier = (state && state.speedMultiplier) || 1;    let speed = 2.35 * (1 + boots * 0.08) * speedMultiplier;
+    // Чит-множитель и лошадь — РАЗНЫЕ поля: иначе speed 5 верхом даст ×60.
+    const cheatMult = (state && state.speedMultiplier) || 1;
+    const horseMult = (state && state.horseMultiplier) || 1;
+    let speed = 2.35 * (1 + boots * 0.08) * cheatMult * horseMult;
     if (this.crouching) speed *= 0.52;
     else if (this.sprinting) speed *= 1.62;
     if (this.blocking) speed *= BLOCK_SPEED_FACTOR;

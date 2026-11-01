@@ -119,7 +119,9 @@ export class Renderer {
     const { world, player, time, hurtFlash = 0, light = "day", lightmap = null, weather = null } = state;
     // Прыжок поднимает камеру, наклон сдвигает горизонт (shear), а не поворачивает.
     this.jumpZ = player.jumpZ || 0;
-    const horizon = SCREEN_H * 0.5 + player.bobY - (player.pitch || 0);
+    // Верхом сдвигаем горизонт: сидишь выше, земля уходит вниз.
+    const lift = state.mounted ? 20 : 0;
+    const horizon = SCREEN_H * 0.5 + player.bobY - (player.pitch || 0) - lift;
     this.light = LIGHT_LEVELS[light] !== undefined ? LIGHT_LEVELS[light] : 1;
     this.lightmap = lightmap;
     this.time = time;
@@ -131,7 +133,11 @@ export class Renderer {
     this.ctx.putImageData(this.imageData, 0, 0);
     this.drawSprites(world, player, horizon, time, state);
     this.drawRain(state.weather, time, horizon);
-    if (state.started) this.drawWeapon(player, time);
+    if (state.started) {
+      // Верхом вместо меча в кадре голова лошади.
+      if (state.mounted) this.drawHorseHead(time, player);
+      this.drawWeapon(player, time);
+    }
 
     if (hurtFlash > 0) {
       this.ctx.fillStyle = `rgba(150, 20, 12, ${Math.min(0.35, hurtFlash * 0.35)})`;
@@ -428,6 +434,20 @@ export class Renderer {
       });
     }
 
+    // Лошади: в мире видны как спрайты, если на них не сидят.
+    for (const horse of world.horses || []) {
+      if (!horse.alive) continue;
+      list.push({
+        x: horse.x,
+        y: horse.y,
+        sprite: horse.spriteKey || "horseSaddled",
+        scale: 0.95,
+        bob: 0,
+        alert: false,
+        actor: null,
+      });
+    }
+
     for (const item of list) {
       item.dist = (item.x - player.x) ** 2 + (item.y - player.y) ** 2;
     }
@@ -578,6 +598,31 @@ export class Renderer {
       ctx.textAlign = "center";
       ctx.fillText("z", screenX + width / 2 + 5, y + 5);
     }
+    ctx.restore();
+  }
+
+  // Голова лошади внизу кадра: единственное, что видно от лошади
+  // в виде от первого лица. Покачивается в такт иноходи.
+  drawHorseHead(time, player) {
+    const sprite = this.sprites.horseHead;
+    if (!sprite) return;
+
+    const ctx = this.ctx;
+    const bob = Math.sin(player.walkPhase * 1.4) * 8;
+    const sway = Math.sin(player.walkPhase * 0.7) * 5;
+    // Уже и ниже: голова должна занимать нижнюю треть, а не пол-экрана.
+    const w = SCREEN_W * 0.26;
+    const h = w * (sprite.height / sprite.width);
+
+    ctx.save();
+    ctx.globalAlpha = 0.97;
+    ctx.drawImage(
+      sprite,
+      SCREEN_W * 0.5 - w * 0.62 + sway,
+      SCREEN_H - h + 26 + bob,
+      w,
+      h
+    );
     ctx.restore();
   }
 

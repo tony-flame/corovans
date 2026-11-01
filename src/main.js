@@ -1,7 +1,7 @@
 import { Renderer } from "./raycaster.js";
 import { Input } from "./input.js";
 import { Player } from "./player.js";
-import { createWorld, nearestInteraction, spawnCamp } from "./world.js";
+import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand } from "./world.js";
 import { updateActors, maxSuspicion } from "./enemies.js";import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
 import { addItem, totalValue, rollLoot } from "./inventory.js";
@@ -41,6 +41,15 @@ import {
   TITAN_SCALE,
 } from "./titan.js";
 import { buildTitan } from "./titan-sprite.js";
+import {
+  createHorseList,
+  canMount,
+  mountReasonText,
+  horseSpeed,
+  allowsAtMount,
+  mountedDamage,
+  HORSE_CAMERA_LIFT,
+} from "./horse.js";
 import { buildCourtesan } from "./sprites.js";
 import {
   SPECIES_DEFS,
@@ -81,7 +90,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-02-world-1";
+const BUILD = "2026-11-02-horse-1";
 
 const canvas = document.getElementById("game");const world = createWorld();
 const player = new Player(world.spawn);
@@ -108,6 +117,9 @@ const game = {
   godMode: false,
   noclip: false,
   speedMultiplier: 1,
+  // Верхом: id лошади или null. В сейв НЕ пишется — позиции актёров не сохраняются.
+  mounted: null,
+  horseRef: null,
   consoleHistory: [],
   consoleHistoryIndex: -1,
   time: 0,
@@ -208,6 +220,10 @@ function respawnWildlifeAndCourtesan() {
   // Гражданские не пересоздаются с караваном: они часть мира, не лагеря.
   if (!world.civilians || world.civilians.length === 0) {
     world.civilians = createCivilians(run.seed);
+  }
+  // Лошади создаются один раз: конюшенная всегда, личная по разблокировке.
+  if (!world.horses || world.horses.length === 0) {
+    world.horses = createHorseList(bonuses());
   }
   updateCourtesanVariant();
   spawnTitan();
@@ -607,11 +623,21 @@ function handleKeyDown(code) {
     return;
   }
   if (code === "KeyE" && canControl()) {
+    // Верхом E спешивает, а не взаимодействует.
+    if (game.mounted) {
+      dismountHorse();
+      return;
+    }
     const near = nearestInteraction(world, player);
     if (near && near.type === "merchant") openTrade();
     else if (near && near.type === "courtesan") visitCourtesan(near.spot);
     else if (near && near.type === "civilian") talkToCivilian(near.civilianId);
     else if (near && near.type === "titan") startTitanDialogue();
+    else if (near && near.type === "horse") tryMountHorse(near.horseId);
+    return;
+  }
+  if (code === "KeyH" && canControl()) {
+    if (game.mounted) dismountHorse();
     return;
   }
   if (code === "KeyF" && canControl()) {
@@ -1015,7 +1041,54 @@ function answerTitan(index) {
   showTitanQuestion();
 }
 
-function handleKeyUp(code) {  if (code === "KeyE") {
+// ── Лошадь ───────────────────────────────────────────────────────────
+
+function tryMountHorse(horseId) {
+  const horse = (world.horses || []).find((h) => h.id === horseId);
+  if (!horse) return;
+
+  const dist = Math.hypot(horse.x - player.x, horse.y - player.y);
+  const tile = tileAt(world, player.x, player.y);
+  const check = canMount({ mounted: game.mounted, blocking: player.blocking }, horse, tile, dist);
+
+  if (!check.ok) {
+    ui.message(mountReasonText(check.reason));
+    return;
+  }
+
+  game.mounted = horse.id;
+  game.horseRef = horse;
+  player.crouching = false;
+  player.blocking = false;
+  audio.ui();
+  ui.message(`${horse.label}: вы в седле. H — спешиться.`);
+  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+}
+
+function dismountHorse() {
+  if (!game.mounted) return;
+  const horse = game.horseRef;
+
+  if (horse) {
+    // Лошадь остаётся рядом, но не внутри игрока.
+    const angle = player.angle + Math.PI / 2;
+    const nx = player.x + Math.cos(angle) * 1.2;
+    const ny = player.y + Math.sin(angle) * 1.2;
+    if (canStand(world, nx, ny, 0.55)) {
+      horse.x = nx;
+      horse.y = ny;
+    }
+  }
+
+  game.mounted = null;
+  game.horseRef = null;
+  audio.ui();
+  ui.message("Вы спешились.");
+  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+}
+
+function handleKeyUp(code) {
+  if (code === "KeyE") {
     game.stealing = false;
     game.stealProgress = 0;
   }
@@ -1303,7 +1376,9 @@ function performAttack() {
     return;
   }
 
-  const dmg = damageRoll(12 + run.upgrades.sword * 5, rng);
+  // С седла бьёшь хуже: замах короче, опора хуже.
+  const baseDmg = damageRoll(12 + run.upgrades.sword * 5, rng);
+  const dmg = game.mounted ? mountedDamage(baseDmg) : baseDmg;
 
   if (targetIsAnimal) {
     ui.flashHit();
@@ -1676,14 +1751,15 @@ function updateGame(dt) {
   let near = nearestInteraction(world, player);
   const wagonNear = near && near.type === "wagon";
 
-  if (wagonNear && input.isDown("KeyE") && !game.stealing) {
+  // Верхом обыскивать фургон нельзя — это был бы чит.
+  if (wagonNear && input.isDown("KeyE") && !game.stealing && !game.mounted) {
     game.stealing = true;
     game.stealProgress = 0;
     audio.steal();
   }
 
   if (game.stealing) {
-    if (!input.isDown("KeyE") || !wagonNear) {
+    if (!input.isDown("KeyE") || !wagonNear || game.mounted) {
       game.stealing = false;
       game.stealProgress = 0;
     } else {
@@ -1695,6 +1771,11 @@ function updateGame(dt) {
   if (!game.stealing) {
     // Множитель скорости и noclip — только для режима разработчика.
     run.speedMultiplier = game.speedMultiplier;
+    // Лошадь даёт свой множитель по типу поверхности.
+    run.horseMultiplier = game.mounted
+      ? horseSpeed(tileAt(world, player.x, player.y))
+      : 1;
+    run.mounted = Boolean(game.mounted);
     player.noclip = game.noclip;
     player.update(world, input, dt, run, audio);
   }
@@ -1805,6 +1886,7 @@ function frame(now) {
     light: run ? phaseOf(run.dayTime) : "day",
     lightmap: game.lightmap,
     weather: game.weather,
+    mounted: Boolean(game.mounted),
     suspicionSource: (actor) => (actor.asleep ? 0 : actor.suspicion),
     showSuspicion: game.started && !game.gameOver,
   });

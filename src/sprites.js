@@ -557,6 +557,153 @@ export function buildSprites() {
       rect(ctx, 7, 22, 22, 2, "#c9b98c");
     }),
 
+    // Осёдланная лошадь: седло, узда, стремена.
+    horseSaddled: make(84, 72, (ctx) => {
+      // ноги
+      rect(ctx, 18, 46, 6, 24, "#4a3020");
+      rect(ctx, 30, 46, 6, 24, "#4a3020");
+      rect(ctx, 56, 46, 6, 24, "#4a3020");
+      rect(ctx, 68, 46, 6, 24, "#4a3020");
+      // копыта
+      rect(ctx, 18, 66, 6, 4, "#241a12");
+      rect(ctx, 30, 66, 6, 4, "#241a12");
+      rect(ctx, 56, 66, 6, 4, "#241a12");
+      rect(ctx, 68, 66, 6, 4, "#241a12");
+      // корпус
+      ellipse(ctx, 45, 38, 28, 17, "#6b4628");
+      ellipse(ctx, 45, 34, 26, 12, "#7d5432");
+      // шея и голова
+      ctx.fillStyle = "#6b4628";
+      ctx.beginPath();
+      ctx.moveTo(64, 34);
+      ctx.lineTo(74, 10);
+      ctx.lineTo(84, 14);
+      ctx.lineTo(76, 40);
+      ctx.closePath();
+      ctx.fill();
+      ellipse(ctx, 78, 12, 9, 7, "#5c3c22");
+      // уши
+      rect(ctx, 72, 2, 3, 6, "#5c3c22");
+      rect(ctx, 80, 3, 3, 5, "#5c3c22");
+      // глаз
+      ellipse(ctx, 80, 10, 1.5, 1.5, "#120d08");
+      // морда
+      rect(ctx, 82, 14, 4, 6, "#4a3020");
+      // грива
+      rect(ctx, 68, 8, 5, 26, "#2e1d10");
+      // хвост
+      ctx.strokeStyle = "#2e1d10";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(18, 30);
+      ctx.quadraticCurveTo(6, 42, 12, 60);
+      ctx.stroke();
+      // седло
+      ctx.fillStyle = "#5a3a1e";
+      ctx.beginPath();
+      ctx.moveTo(38, 24);
+      ctx.quadraticCurveTo(46, 18, 56, 24);
+      ctx.lineTo(54, 32);
+      ctx.lineTo(40, 32);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 40, 30, 16, 3, "#3a2414");
+      // подпруга
+      rect(ctx, 46, 32, 3, 22, "#3a2414");
+      // стремя
+      ctx.strokeStyle = "#8f7434";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(48, 46);
+      ctx.lineTo(52, 52);
+      ctx.stroke();
+      rect(ctx, 49, 52, 7, 3, "#8f7434");
+      // узда
+      rect(ctx, 74, 10, 12, 2, "#8f7434");
+      rect(ctx, 76, 16, 2, 8, "#8f7434");
+    }),
+
+    // Голова лошади для вида от первого лица: крупно, снизу кадра.
+    horseHead: make(150, 90, (ctx) => {
+      // шея, уходит вниз за край
+      ctx.fillStyle = "#6b4628";
+      ctx.beginPath();
+      ctx.moveTo(40, 90);
+      ctx.lineTo(52, 40);
+      ctx.lineTo(104, 34);
+      ctx.lineTo(124, 90);
+      ctx.closePath();
+      ctx.fill();
+      // голова
+      ellipse(ctx, 82, 34, 30, 22, "#7d5432");
+      // морда
+      ellipse(ctx, 46, 46, 22, 14, "#8d6440");
+      // ноздри
+      ellipse(ctx, 32, 44, 3, 4, "#2e1d10");
+      ellipse(ctx, 32, 52, 3, 4, "#2e1d10");
+      // лицевая кость
+      rect(ctx, 62, 14, 4, 34, "#6b4628");
+      // глаза
+      ellipse(ctx, 78, 26, 6, 5, "#2e1d10");
+      ellipse(ctx, 78, 26, 3, 3, "#120d08");
+      ellipse(ctx, 100, 24, 5, 4, "#2e1d10");
+      // уши
+      ctx.fillStyle = "#6b4628";
+      ctx.beginPath();
+      ctx.moveTo(66, 12);
+      ctx.lineTo(60, 0);
+      ctx.lineTo(76, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(96, 8);
+      ctx.lineTo(94, -2);
+      ctx.lineTo(106, 6);
+      ctx.closePath();
+      ctx.fill();
+      // грива по краю шеи
+      ctx.fillStyle = "#2e1d10";
+      for (let i = 0; i < 9; i++) {
+        ctx.beginPath();
+        ctx.moveTo(100 + i * 4, 30 + i * 6);
+        ctx.lineTo(112 + i * 4, 26 + i * 6);
+        ctx.lineTo(108 + i * 4, 40 + i * 6);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // уздечка
+      rect(ctx, 40, 34, 46, 3, "#8f7434");
+      rect(ctx, 44, 30, 3, 16, "#8f7434");
+    }),
+
+    // Конюшня: навес на столбах, сено, изгородь.
+    stable: make(104, 88, (ctx) => {
+      // столбы
+      rect(ctx, 8, 34, 6, 50, "#5a3a1e");
+      rect(ctx, 90, 34, 6, 50, "#5a3a1e");
+      // крыша-навес
+      ctx.fillStyle = "#6b4a28";
+      ctx.beginPath();
+      ctx.moveTo(2, 38);
+      ctx.lineTo(52, 10);
+      ctx.lineTo(102, 38);
+      ctx.closePath();
+      ctx.fill();
+      rect(ctx, 2, 36, 100, 4, "#4a321e");
+      // задняя стенка
+      rect(ctx, 14, 42, 76, 42, "#4a321e");
+      // сено
+      ellipse(ctx, 34, 68, 20, 12, "#c9b25a");
+      ellipse(ctx, 60, 70, 16, 10, "#b8a04a");
+      // изгородь
+      for (let x = 12; x < 96; x += 18) {
+        rect(ctx, x, 76, 4, 12, "#5a3a1e");
+      }
+      rect(ctx, 10, 78, 88, 3, "#6b4a28");
+      // ведро
+      rect(ctx, 78, 76, 8, 8, "#6b6357");
+    }),
+
     horse: make(76, 64, (ctx) => {
       // ноги
       rect(ctx, 16, 40, 5, 22, "#4a3020");
