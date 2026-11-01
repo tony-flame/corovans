@@ -45,6 +45,9 @@ export function addLight(map, x, y, radius, intensity) {
 }
 
 // Интерполяция по четырём тайлам: без неё свет идёт ступеньками.
+// Интерполяция света по четырём узлам. Горячий путь: вызывается на каждый
+// пиксель пола, поэтому здесь нет замыканий и лишних аллокаций — раньше
+// внутренняя функция создавалась миллион раз за кадр и съедала FPS.
 export function sampleLight(map, x, y) {
   if (!map) return 1;
   const fx = Math.floor(x);
@@ -52,15 +55,14 @@ export function sampleLight(map, x, y) {
   const tx = x - fx;
   const ty = y - fy;
 
-  const at = (ax, ay) => {
-    if (ax < 0 || ay < 0 || ax >= MAP_W || ay >= MAP_H) return 1;
-    return map[ay * MAP_W + ax];
-  };
+  const x1 = fx + 1;
+  const y1 = fy + 1;
 
-  const a = at(fx, fy);
-  const b = at(fx + 1, fy);
-  const c = at(fx, fy + 1);
-  const d = at(fx + 1, fy + 1);
+  // Выход за карту даёт 1 — там просто нет ламп.
+  const a = fx < 0 || fy < 0 || fx >= MAP_W || fy >= MAP_H ? 1 : map[fy * MAP_W + fx];
+  const b = x1 < 0 || fy < 0 || x1 >= MAP_W || fy >= MAP_H ? 1 : map[fy * MAP_W + x1];
+  const c = fx < 0 || y1 < 0 || fx >= MAP_W || y1 >= MAP_H ? 1 : map[y1 * MAP_W + fx];
+  const d = x1 < 0 || y1 < 0 || x1 >= MAP_W || y1 >= MAP_H ? 1 : map[y1 * MAP_W + x1];
 
   return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
 }
@@ -102,14 +104,15 @@ export function worldLights(world) {
     salt: 1,
   });
 
-  // Факелы у домов деревни.
+  // Факелы у домов деревни. Координаты абсолютные: карта 200×200,
+  // деревня сдвинута на +40. Старые числа светили в пустое поле.
   const torches = [
-    [11, 75.5],
-    [18, 75.5],
-    [26, 75.5],
-    [34, 75.5],
-    [8.5, 90.5],
-    [23.5, 96.5],
+    [51, 115.5],
+    [58, 115.5],
+    [66, 115.5],
+    [74, 115.5],
+    [48.5, 130.5],
+    [63.5, 136.5],
   ];
   for (let i = 0; i < torches.length; i++) {
     const [x, y] = torches[i];
@@ -117,12 +120,20 @@ export function worldLights(world) {
   }
 
   // Окна корчмы: ровный, почти не мерцающий свет.
-  lights.push({ x: 60, y: 76, radius: 3.6, intensity: 0.45, flicker: false, salt: 9 });
+  lights.push({ x: 100, y: 116, radius: 3.6, intensity: 0.45, flicker: false, salt: 9 });
+
+  // Фонари рынка и собора.
+  lights.push({ x: 112.5, y: 130.5, radius: 3.4, intensity: 0.5, flicker: true, salt: 20 });
+  lights.push({ x: 122.5, y: 146.5, radius: 3.4, intensity: 0.5, flicker: true, salt: 21 });
+  lights.push({ x: 147.5, y: 114, radius: 4, intensity: 0.55, flicker: true, salt: 22 });
 
   return lights;
 }
 
 // Пересобрать лайтмап под текущее время суток.
+// Дорого: заливка 40 000 тайлов плюс радиусы всех огней. В кадре это
+// нельзя делать каждый раз — поэтому main.js обновляет его по таймеру
+// и при смене фазы, а не каждый кадр.
 export function buildLightmap(world, ambient, time) {
   const map = createLightmap(ambient);
   for (const light of worldLights(world)) {

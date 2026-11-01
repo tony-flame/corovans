@@ -1729,9 +1729,16 @@ function updateGame(dt) {
   game.time += dt;
   run.dayTime = (run.dayTime + dt) % 240;
 
-  // Лайтмап пересобирается по фазе суток: ночью остаются только огни.
+  // Лайтмап пересобирается НЕ каждый кадр: заливка 40 000 тайлов плюс
+  // радиусы всех огней стоит дороже, чем весь рейкастинг. Мерцание
+  // всё равно медленное — 10 раз в секунду достаточно.
   const phase = phaseOf(run.dayTime);
-  game.lightmap = buildLightmap(world, AMBIENT[phase] ?? 1, game.time);
+  game.lightTimer = (game.lightTimer || 0) - dt;
+  if (game.lightTimer <= 0 || game.lightPhase !== phase) {
+    game.lightTimer = 0.1;
+    game.lightPhase = phase;
+    game.lightmap = buildLightmap(world, AMBIENT[phase] ?? 1, game.time);
+  }
   if (game.weather) stepWeather(game.weather, dt);
 
   // Живность и кровотечение тикают даже во время обыска.
@@ -1904,7 +1911,7 @@ function frame(now) {
 // ── Запуск ──────────────────────────────────────────────────────────
 
 // Целочисленный масштаб: при нецелом множителе pixelated-канвас «мылит».
-// Внутри остаётся 640×360, на экране — кратное увеличение, поля по краям.
+// Внутри буфера 1280×720, на экране — кратное увеличение, поля по краям.
 function applyCanvasScale() {
   const scale = Math.max(
     1,
@@ -1912,6 +1919,9 @@ function applyCanvasScale() {
   );
   canvas.style.width = `${canvas.width * scale}px`;
   canvas.style.height = `${canvas.height * scale}px`;
+  // CSS-размер может оказаться меньше буфера на маленьком экране:
+  // считаем фактический множитель, чтобы прицел не «уезжал».
+  document.documentElement.style.setProperty("--pixel", String(scale));
 }
 
 applyCanvasScale();

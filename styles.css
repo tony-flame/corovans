@@ -165,8 +165,9 @@ body.playing #hud { opacity: 1; }
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 14px;
-  height: 14px;
+  /* Прицел задан в пикселях буфера и масштабируется вместе с картинкой. */
+  width: calc(14px * var(--pixel, 1));
+  height: calc(14px * var(--pixel, 1));
   transform: translate(-50%, -50%);
 }
 
@@ -177,8 +178,18 @@ body.playing #hud { opacity: 1; }
   background: rgba(232, 223, 200, 0.75);
 }
 
-#crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
-#crosshair::after { top: 6px; left: 0; height: 2px; width: 14px; }
+#crosshair::before {
+  left: calc(6px * var(--pixel, 1));
+  top: 0;
+  width: calc(2px * var(--pixel, 1));
+  height: calc(14px * var(--pixel, 1));
+}
+#crosshair::after {
+  top: calc(6px * var(--pixel, 1));
+  left: 0;
+  height: calc(2px * var(--pixel, 1));
+  width: calc(14px * var(--pixel, 1));
+}
 
 #crosshair.hit::before,
 #crosshair.hit::after { background: #e2453a; }

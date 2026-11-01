@@ -2,14 +2,19 @@ import { buildTextures, TEX_SIZE } from "./textures.js";
 import { buildSprites } from "./sprites.js";
 import { MAP_W, MAP_H, TILE } from "./world.js";
 import { castRay } from "./ray.js";
-import { quantize, murk, wallOcclusion, applyGrain, vignette } from "./dither.js";
+import { quantize, quantizeFast, makeQuantTables, murk, murkInto, wallOcclusion, applyGrain, vignette, clampChannel, grain, MURK_TINT } from "./dither.js";
 import { sampleLight } from "./lighting.js";
 import { dropCount, dropPosition, dropLength, skyTint, snowflakePosition, snowflakeCount } from "./weather.js";
 
-const SCREEN_W = 640;
-const SCREEN_H = 360;
+const SCREEN_W = 1280;
+const SCREEN_H = 720;
 const FOV_PLANE = 0.66;
 const MAX_DIST = 40;
+
+// Пиксели интерфейса заданы в «старых» единицах 640×360 и умножаются
+// на UI_SCALE. Так оружие, полосы подозрения и голова лошади остаются
+// того же размера относительно экрана, а не превращаются в игрушки.
+const UI_SCALE = SCREEN_H / 360;
 
 // Рост человека на экране: SCREEN_H / depth * HUMAN_SCALE.
 // 1.16 при глубине 4 даёт ~104 px — крупная фигура в паре шагов,
@@ -20,6 +25,14 @@ const HUMAN_SCALE = 1.16;
 const DITHER_LEVELS = 16;
 // Доля высоты стены, занятая крышей-фронтоном.
 const ROOF_HEIGHT = 0.22;
+
+// Подмес «сумрака» в предвычисленном виде: горячий цикл пола не должен
+// вызывать murk() на каждый пиксель.
+const MURK_AMOUNT = 0.16;
+const MURK_K = 1 - MURK_AMOUNT;
+const MURK_R = MURK_TINT[0] * MURK_AMOUNT;
+const MURK_G = MURK_TINT[1] * MURK_AMOUNT;
+const MURK_B = MURK_TINT[2] * MURK_AMOUNT;
 
 // Освещённость по фазам суток: множитель к цвету сцены.
 const LIGHT_LEVELS = { dawn: 0.82, day: 1, dusk: 0.72, night: 0.45 };
@@ -44,19 +57,78 @@ export class Renderer {
     this.light = 1;
     this.lightmap = null;
     this.ditherStrength = 0.28;
+    // Таблицы дизера и константы подмеса: в горячем цикле пола нельзя
+    // считать их на каждый пиксель.
+    this.qt = makeQuantTables(DITHER_LEVELS, this.ditherStrength);
+    this.murkOut = [0, 0, 0];
   }
 
   // Финальный проход: виньетка и зерно. Без этого картинка «слишком чистая».
-  finishFrame() {
-    const data = this.imageData.data;
+  // Виньетка и зерно зависят только от координат, поэтому обе таблицы
+  // считаются один раз: раньше в кадре было 921600 Math.sqrt и столько же
+  // хешей зерна — на 720p это больше тридцати миллисекунд.
+  buildVignetteTable() {
+    if (this.vignetteTable && this.vignetteSize === SCREEN_W * SCREEN_H) return;
+    const size = SCREEN_W * SCREEN_H;
+    const vig = new Float32Array(size);
+    const grainTable = new Float32Array(size);
     for (let y = 0; y < SCREEN_H; y++) {
       const row = y * SCREEN_W;
       for (let x = 0; x < SCREEN_W; x++) {
-        const i = (row + x) * 4;
-        const v = vignette(x, y, SCREEN_W, SCREEN_H, 0.2);
-        data[i] = applyGrain(data[i] * v, x, y, 0, 0.5);
-        data[i + 1] = applyGrain(data[i + 1] * v, x, y, 1, 0.5);
-        data[i + 2] = applyGrain(data[i + 2] * v, x, y, 2, 0.5);
+        vig[row + x] = vignette(x, y, SCREEN_W, SCREEN_H, 0.2);
+        grainTable[row + x] = grain(x, y, 0, 0.5);
+      }
+    }
+    this.vignetteTable = vig;
+    this.grainTable = grainTable;
+    this.vignetteSize = size;
+  }
+
+  finishFrame() {
+    this.buildVignetteTable();
+    const data = this.imageData.data;
+    const vig = this.vignetteTable;
+    const gr = this.grainTable;
+
+    // Блок 2×2: виньетка и зерно меняются плавно, шаг в два пикселя
+    // не виден. Четыре пикселя обрабатываются одним проходом.
+    for (let y = 0; y < SCREEN_H; y += 2) {
+      const row = y * SCREEN_W;
+      const row2 = y + 1 < SCREEN_H ? row + SCREEN_W : row;
+      for (let x = 0; x < SCREEN_W; x += 2) {
+        const idx = row + x;
+        const v = vig[idx];
+        const g = gr[idx];
+        const i = idx << 2;
+        let r = data[i] * v + g;
+        let gg = data[i + 1] * v + g;
+        let b = data[i + 2] * v + g;
+        r = r < 0 ? 0 : r > 255 ? 255 : r;
+        gg = gg < 0 ? 0 : gg > 255 ? 255 : gg;
+        b = b < 0 ? 0 : b > 255 ? 255 : b;
+        data[i] = r;
+        data[i + 1] = gg;
+        data[i + 2] = b;
+
+        // сосед справа
+        const i1 = i + 4;
+        if (x + 1 < SCREEN_W) {
+          data[i1] = r;
+          data[i1 + 1] = gg;
+          data[i1 + 2] = b;
+        }
+        // соседи снизу
+        if (row2 !== row) {
+          const i2 = (row2 + x) << 2;
+          data[i2] = r;
+          data[i2 + 1] = gg;
+          data[i2 + 2] = b;
+          if (x + 1 < SCREEN_W) {
+            data[i2 + 4] = r;
+            data[i2 + 5] = gg;
+            data[i2 + 6] = b;
+          }
+        }
       }
     }
   }
@@ -76,11 +148,11 @@ export class Renderer {
 
     ctx.save();
     ctx.strokeStyle = `rgba(190, 205, 215, ${0.18 + weather.intensity * 0.3})`;
-    ctx.lineWidth = weather.intensity > 0.7 ? 1.4 : 1;
+    ctx.lineWidth = (weather.intensity > 0.7 ? 1.4 : 1) * UI_SCALE;
     ctx.beginPath();
 
     for (let i = 0; i < count; i++) {
-      const drop = dropPosition(i, time, weather.wind, SCREEN_W, SCREEN_H);
+      const drop = dropPosition(i, time, weather.wind, SCREEN_W, SCREEN_H, UI_SCALE);
       const len = dropLength(weather, drop.speedY);
       // Капля летит по ветру: рисуем отрезок вдоль направления падения.
       const dx = (drop.speedX / drop.speedY) * len;
@@ -94,7 +166,7 @@ export class Renderer {
     if (tint.grey > 0.02) {
       ctx.save();
       ctx.fillStyle = `rgba(150, 160, 168, ${tint.grey * 0.28})`;
-      ctx.fillRect(0, Math.max(0, horizon - 40), SCREEN_W, 80);
+      ctx.fillRect(0, Math.max(0, horizon - 40 * UI_SCALE), SCREEN_W, 80 * UI_SCALE);
       ctx.restore();
     }
   }
@@ -110,7 +182,7 @@ export class Renderer {
     for (let k = 0; k < count; k++) {
       const flake = snowflakePosition(k, time, weather.wind, SCREEN_W, SCREEN_H);
       // Ближние снежинки крупнее: два размера вместо одного.
-      const size = k % 3 === 0 ? 2 : 1;
+      const size = (k % 3 === 0 ? 2 : 1) * UI_SCALE;
       ctx.fillRect(flake.x, flake.y, size, size);
     }
     ctx.restore();
@@ -187,6 +259,10 @@ export class Renderer {
     }
 
     // Дальние холмы, привязанные к мировому углу.
+    // pack() считался в самом внутреннем цикле — почти полмиллиона вызовов
+    // на кадр. Цвета постоянные, выносим их наружу и заливаем строками.
+    const hillFar = pack(43, 52, 43);
+    const hillNear = pack(31, 41, 32);
     const tanHalf = FOV_PLANE;
     for (let x = 0; x < SCREEN_W; x++) {
       const cameraX = (2 * x) / SCREEN_W - 1;
@@ -195,8 +271,8 @@ export class Renderer {
       const h2 = 5 + Math.sin(angle * 3.7 + 2) * 3 + Math.sin(angle * 9.1) * 1.5;
       const start1 = Math.max(0, Math.floor(horizon - h1));
       const start2 = Math.max(0, Math.floor(horizon - h2));
-      for (let y = start1; y < h; y++) buf[y * SCREEN_W + x] = pack(43, 52, 43);
-      for (let y = start2; y < h; y++) buf[y * SCREEN_W + x] = pack(31, 41, 32);
+      for (let y = start1; y < h; y++) buf[y * SCREEN_W + x] = hillFar;
+      for (let y = start2; y < h; y++) buf[y * SCREEN_W + x] = hillNear;
     }
   }
 
@@ -215,8 +291,12 @@ export class Renderer {
     const map = world.map;
 
     const startY = Math.max(0, Math.floor(horizon) + 1);
+    // Свет раз в 8 пикселей по X и раз в 4 по Y: 1/32 выборок.
+    // Он мягкий и низкочастотный, ступенек не видно, а вызовов в 32 раза меньше.
+    const LIGHT_STEP_X = 8;
+    const LIGHT_STEP_Y = 4;
 
-    for (let y = startY; y < SCREEN_H; y++) {
+    for (let y = startY; y < SCREEN_H; y += 2) {
       const p = y - horizon;
       if (p <= 0.5) continue;
       const rowDistance = posZ / p;
@@ -227,40 +307,64 @@ export class Renderer {
 
       const fogT = Math.max(0, Math.min(0.8, (rowDistance - 7) / 34));
       const rowShade = Math.max(0.34, 1 - rowDistance * 0.028) * this.light;
+      const fogK = 1 - fogT;
       const fr = this.fog.r * fogT;
       const fg = this.fog.g * fogT;
       const fb = this.fog.b * fogT;
       const row = y * SCREEN_W;
-      const useLight = Boolean(this.lightmap);
+      const row2 = y + 1 < SCREEN_H ? row + SCREEN_W : row;
+      const useLight = Boolean(this.lightmap) && (y % LIGHT_STEP_Y === 0);
+      const bayerRow = (y & 3) << 2;
 
-      for (let x = 0; x < SCREEN_W; x++) {
-        const cx = Math.floor(floorX);
-        const cy = Math.floor(floorY);
+      let lightHere = 1;
+      let lightCounter = 0;
+
+      // Пол рисуется блоками 2×2: буфер 1280×720, работаем 640×360.
+      // Ровно столько детализации было на прежнем разрешении, поэтому
+      // картинка ничего не теряет, а тяжёлый цикл идёт вчетверо быстрее.
+      for (let hx = 0, x = 0; x < SCREEN_W; hx++, x += 2) {
+        // Счётчик вместо модуля: остаток от деления в горячем цикле дорог.
+        if (useLight && lightCounter++ === 0) {
+          lightHere = sampleLight(this.lightmap, floorX, floorY);
+        }
+        if (lightCounter >= LIGHT_STEP_X) lightCounter = 0;
+        const cx = floorX | 0;
+        const cy = floorY | 0;
         let tile = TILE.STONE;
         if (cx >= 0 && cy >= 0 && cx < MAP_W && cy < MAP_H) tile = map[cy * MAP_W + cx];
         const tex = floors[tile] || floors[TILE.GRASS];
         const tx = ((floorX - cx) * TEX_SIZE) | 0;
         const ty = ((floorY - cy) * TEX_SIZE) | 0;
-        const c = tex[(ty & 63) * TEX_SIZE + (tx & 63)];
-        const lightHere = useLight ? sampleLight(this.lightmap, floorX, floorY) : 1;
+        const c = tex[((ty & 63) << 6) + (tx & 63)];
         // Вода «дышит»: медленная волна яркости по времени.
         let shimmer = 1;
         if (tile === TILE.WATER) {
           shimmer = 0.88 + Math.sin(this.time * 1.7 + floorX * 0.7 + floorY * 0.5) * 0.12;
         }
         const shade = rowShade * lightHere * shimmer;
-        const sr = (c & 255) * shade * (1 - fogT) + fr;
-        const sg = ((c >> 8) & 255) * shade * (1 - fogT) + fg;
-        const sb = ((c >> 16) & 255) * shade * (1 - fogT) + fb;
+        const sr = (c & 255) * shade * fogK + fr;
+        const sg = ((c >> 8) & 255) * shade * fogK + fg;
+        const sb = ((c >> 16) & 255) * shade * fogK + fb;
 
-        const murked = murk(sr, sg, sb, 0.16);
-        buf[row + x] = pack(
-          quantize(murked[0], DITHER_LEVELS, x, y, this.ditherStrength),
-          quantize(murked[1], DITHER_LEVELS, x, y, this.ditherStrength),
-          quantize(murked[2], DITHER_LEVELS, x, y, this.ditherStrength)
+        // Тёмный подмес без массива: murk() аллоцировал объект на пиксель.
+        const mr = sr * MURK_K + MURK_R;
+        const mg = sg * MURK_K + MURK_G;
+        const mb = sb * MURK_K + MURK_B;
+
+        const px = pack(
+          quantizeFast(mr, this.qt, hx, y),
+          quantizeFast(mg, this.qt, hx, y),
+          quantizeFast(mb, this.qt, hx, y)
         );
-        floorX += stepX;
-        floorY += stepY;
+        buf[row + x] = px;
+        if (x + 1 < SCREEN_W) buf[row + x + 1] = px;
+        // Вторая строка блока: та же выборка, другая строка буфера.
+        if (row2 !== row) {
+          buf[row2 + x] = px;
+          if (x + 1 < SCREEN_W) buf[row2 + x + 1] = px;
+        }
+        floorX += stepX * 2;
+        floorY += stepY * 2;
       }
     }
   }
@@ -268,9 +372,18 @@ export class Renderer {
   renderWalls(world, player, horizon) {
     const buf = this.buffer;
     const walls = this.textures.walls;
+    const halfW = SCREEN_W >> 1;
+    // Стены считаются раз в 2 колонки, как и пол: буфер 1280, работа 640.
+    // Детализации ровно столько же, сколько было на прежнем разрешении.
+    // Кэш ключа тайла: шаблонная строка на каждую колонку — это 640
+    // аллокаций в кадре, а соседние лучи часто бьют в один и тот же тайл.
+    let keyX = -1;
+    let keyY = -1;
+    let keyStr = "";
 
-    for (let x = 0; x < SCREEN_W; x++) {
-      const cameraX = (2 * x) / SCREEN_W - 1;
+    for (let hx = 0; hx < halfW; hx++) {
+      const x = hx << 1;
+      const cameraX = (2 * hx) / halfW - 1;
       const rayDirX = player.dirX + player.planeX * cameraX;
       const rayDirY = player.dirY + player.planeY * cameraX;
 
@@ -279,15 +392,16 @@ export class Renderer {
       // Промах больше не превращается в стену в упор: луч просто уходит в туман.
       const perpDist = ray.dist;
       this.zBuffer[x] = perpDist;
+      if (x + 1 < SCREEN_W) this.zBuffer[x + 1] = perpDist;
 
       if (!ray.hit) continue;
 
-      const lineHeight = SCREEN_H / perpDist;
-      // Высокие здания: у собора и ратуши стена выше обычной.
-      // Множитель берётся из карты тайлов, а низ стены остаётся на полу —
-      // иначе здание висит в воздухе.
-      const tallKey = `${ray.mapX},${ray.mapY}`;
-      const tallMul = (world.tallTiles && world.tallTiles.get(tallKey)) || 1;
+      if (ray.mapX !== keyX || ray.mapY !== keyY) {
+        keyX = ray.mapX;
+        keyY = ray.mapY;
+        keyStr = `${ray.mapX},${ray.mapY}`;
+      }
+      const tallMul = (world.tallTiles && world.tallTiles.get(keyStr)) || 1;
       // Камера поднята на jumpZ: верх и низ стены смещаются на jumpZ/perpDist,
       // иначе стена отрывается от пола.
       const topOffset = ((SCREEN_H * 0.5) * tallMul - this.jumpZ) / perpDist;
@@ -304,13 +418,13 @@ export class Renderer {
       texX = Math.max(0, Math.min(TEX_SIZE - 1, texX));
 
       // Скин здания (готика, замковая кладка) важнее окна и базовой текстуры.
-      const winKey = `${ray.mapX},${ray.mapY}`;
-      const skinName = world.skinTiles && world.skinTiles.get(winKey);
-      const winName = world.windowTiles && world.windowTiles.get(winKey);
+      const skinName = world.skinTiles && world.skinTiles.get(keyStr);
+      const winName = world.windowTiles && world.windowTiles.get(keyStr);
       const texture = (skinName && walls[skinName])
         || (winName && walls[winName])
         || walls[tile] || walls[TILE.STONE];
       const fogT = Math.max(0, Math.min(0.82, (perpDist - 6) / 32));
+      const fogK = 1 - fogT;
       const baseShade = Math.max(0.28, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022)) * this.light;
       // Свет по тайлам: факелы, костёр, окна. Интерполяция уже внутри.
       const tileLight = sampleLight(this.lightmap, ray.mapX + 0.5, ray.mapY + 0.5);
@@ -323,11 +437,13 @@ export class Renderer {
       const step = TEX_SIZE * perpDist / SCREEN_H; // текстура в натуральном масштабе
       let texPos = (y0 - wallTop) * step;
       const span = Math.max(1, drawEnd - drawStart);
+      const gable = Math.abs(ray.wallX - 0.5) * 2;
+      const hasRoof = tallMul <= 1.5;
 
       for (let y = y0; y <= y1; y++) {
         const texY = ((texPos | 0) & 63);
         texPos += step;
-        const c = texture[texY * TEX_SIZE + texX];
+        const c = texture[(texY << 6) + texX];
 
         // Затенение к полу: стена перестаёт быть плоской.
         const occlusion = wallOcclusion((y - wallTop) / span, 0.4);
@@ -335,52 +451,40 @@ export class Renderer {
 
         // ── Двускатная крыша ──
         // Верхняя четверть стены — фронтон: черепица, конёк, свес.
-        // Вид сбоку читается как скат, потому что яркость зависит
-        // от расстояния до конька (texX ближе к центру — светлее).
         // У высоких зданий (собор, ратуша) крыши нет: их фронтон начинался
         // бы на четырёхэтажной высоте и висел чёрной полосой через экран.
         const roofT = (y - wallTop) / span;
-        let finalShade = shade;
-        let roofTint = 1;
-        let roofColor = null;
+        let sr;
+        let sg;
+        let sb;
 
-        if (roofT < ROOF_HEIGHT && tallMul <= 1.5) {
-          // Расстояние от конька: 0 в центре тайла, 1 у края.
-          const gable = Math.abs(ray.wallX - 0.5) * 2;
-          // Ряды черепицы: полосы по вертикали фронтона.
-          const tileRow = Math.floor(roofT * 18);
-          const tileBand = tileRow % 2 === 0 ? 1 : 0.86;
-          // Скат: чем ближе к коньку, тем светлее.
+        if (hasRoof && roofT < ROOF_HEIGHT) {
+          const tileRow = ((roofT * 18) | 0) & 1;
+          const tileBand = tileRow === 0 ? 1 : 0.86;
           const slope = 0.55 + (1 - gable) * 0.45;
-          // Свес: нижняя кромка крыши темнее и отбрасывает тень на стену.
           const eave = roofT > ROOF_HEIGHT - 0.02 ? 0.45 : 1;
-
-          finalShade = shade * slope * tileBand * eave * 1.15;
-          // Тёплая черепица поверх текстуры стены.
-          roofColor = [
-            116 * slope * tileBand,
-            74 * slope * tileBand,
-            48 * slope * tileBand,
-          ];
-          roofTint = 0.15;
+          const finalShade = shade * slope * tileBand * eave * 1.15;
+          sr = 116 * slope * tileBand * finalShade + fr * 0.15;
+          sg = 74 * slope * tileBand * finalShade + fg * 0.15;
+          sb = 48 * slope * tileBand * finalShade + fb * 0.15;
+        } else {
+          sr = (c & 255) * shade * fogK + fr;
+          sg = ((c >> 8) & 255) * shade * fogK + fg;
+          sb = ((c >> 16) & 255) * shade * fogK + fb;
         }
 
-        const sr = roofColor
-          ? roofColor[0] * finalShade + fr * roofTint
-          : (c & 255) * finalShade * (1 - fogT) + fr;
-        const sg = roofColor
-          ? roofColor[1] * finalShade + fg * roofTint
-          : ((c >> 8) & 255) * finalShade * (1 - fogT) + fg;
-        const sb = roofColor
-          ? roofColor[2] * finalShade + fb * roofTint
-          : ((c >> 16) & 255) * finalShade * (1 - fogT) + fb;
-
-        // Подмес мутного сумрака в тени и дизеринг каналов.
-        const murked = murk(sr, sg, sb, 0.16);
-        const r = quantize(murked[0], DITHER_LEVELS, x, y, this.ditherStrength);
-        const g = quantize(murked[1], DITHER_LEVELS, x, y, this.ditherStrength);
-        const b = quantize(murked[2], DITHER_LEVELS, x, y, this.ditherStrength);
-        buf[y * SCREEN_W + x] = pack(r, g, b);
+        // Подмес сумрака и дизеринг: быстрые версии без массивов.
+        const mr = sr * MURK_K + MURK_R;
+        const mg = sg * MURK_K + MURK_G;
+        const mb = sb * MURK_K + MURK_B;
+        const px = pack(
+          quantizeFast(mr, this.qt, hx, y),
+          quantizeFast(mg, this.qt, hx, y),
+          quantizeFast(mb, this.qt, hx, y)
+        );
+        const row = y * SCREEN_W;
+        buf[row + x] = px;
+        if (x + 1 < SCREEN_W) buf[row + x + 1] = px;
       }
     }
   }
@@ -622,17 +726,18 @@ export class Renderer {
   drawSuspicion(ctx, actor, suspicion, screenX, top, spriteH) {
     if (!Number.isFinite(suspicion) || suspicion < 0.04) return;
     // Слишком далёкий или слишком близкий спрайт не должен давать полосу на весь экран.
-    if (!Number.isFinite(spriteH) || spriteH < 24 || spriteH > 260) return;
+    // Порог масштабируется вместе с разрешением: 24 px при 360p — это 48 при 720p.
+    if (!Number.isFinite(spriteH) || spriteH < 24 * UI_SCALE || spriteH > 260 * UI_SCALE) return;
 
     const clamped = Math.min(1, suspicion);
-    const y = top - (spriteH > 60 ? 16 : 10);
-    const width = Math.max(14, Math.min(38, spriteH * 0.38));
-    const height = 3;
+    const y = top - (spriteH > 60 * UI_SCALE ? 16 : 10) * UI_SCALE;
+    const width = Math.max(14 * UI_SCALE, Math.min(38 * UI_SCALE, spriteH * 0.38));
+    const height = 3 * UI_SCALE;
 
     ctx.save();
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-    ctx.fillRect(screenX - width / 2 - 1, y - 1, width + 2, height + 2);
+    ctx.fillRect(screenX - width / 2 - UI_SCALE, y - UI_SCALE, width + 2 * UI_SCALE, height + 2 * UI_SCALE);
 
     let color = "#6fa84a";
     if (clamped > 0.65) color = "#d8a03a";
@@ -643,9 +748,9 @@ export class Renderer {
 
     if (actor.asleep) {
       ctx.fillStyle = "#8aa2b8";
-      ctx.font = "bold 11px Georgia";
+      ctx.font = `bold ${11 * UI_SCALE}px Georgia`;
       ctx.textAlign = "center";
-      ctx.fillText("z", screenX + width / 2 + 5, y + 5);
+      ctx.fillText("z", screenX + width / 2 + 5 * UI_SCALE, y + 5 * UI_SCALE);
     }
     ctx.restore();
   }
@@ -657,8 +762,8 @@ export class Renderer {
     if (!sprite) return;
 
     const ctx = this.ctx;
-    const bob = Math.sin(player.walkPhase * 1.4) * 8;
-    const sway = Math.sin(player.walkPhase * 0.7) * 5;
+    const bob = Math.sin(player.walkPhase * 1.4) * 8 * UI_SCALE;
+    const sway = Math.sin(player.walkPhase * 0.7) * 5 * UI_SCALE;
     // Уже и ниже: голова должна занимать нижнюю треть, а не пол-экрана.
     const w = SCREEN_W * 0.26;
     const h = w * (sprite.height / sprite.width);
@@ -668,7 +773,7 @@ export class Renderer {
     ctx.drawImage(
       sprite,
       SCREEN_W * 0.5 - w * 0.62 + sway,
-      SCREEN_H - h + 26 + bob,
+      SCREEN_H - h + 26 * UI_SCALE + bob,
       w,
       h
     );
@@ -678,16 +783,18 @@ export class Renderer {
   drawWeapon(player, time) {
     const ctx = this.ctx;
     const swing = player.swingT > 0 ? 1 - player.swingT / 0.34 : 0;
-    const bob = Math.sin(player.walkPhase) * 5 + (player.crouching ? 8 : 0);
+    const bob = Math.sin(player.walkPhase) * 5 * UI_SCALE + (player.crouching ? 8 * UI_SCALE : 0);
     // Блок: меч разворачивается поперёк корпуса, гарда ближе к центру экрана.
     const block = player.blocking ? 1 : 0;
-    const x = SCREEN_W * 0.76 - swing * 150 - block * 190;
-    const y = SCREEN_H - 22 + bob + swing * 26 - block * 46 + (player.jumpZ || 0) * -0.35;
+    const x = SCREEN_W * 0.76 - (swing * 150 + block * 190) * UI_SCALE;
+    const y = SCREEN_H - 22 * UI_SCALE + bob + (swing * 26 - block * 46) * UI_SCALE
+      + (player.jumpZ || 0) * -0.35 * UI_SCALE;
     const angle = -0.55 + swing * 1.5 - block * 0.85;
 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
+    ctx.scale(UI_SCALE, UI_SCALE);
     // рукоять
     ctx.fillStyle = "#3a2918";
     ctx.fillRect(-5, 10, 10, 54);

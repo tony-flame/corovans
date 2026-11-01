@@ -29,6 +29,58 @@ export function quantize(value, levels, x, y, strength = 1) {
   return Math.round(clamped * step);
 }
 
+// Дизер для трёх каналов сразу: смещение Байера одно и то же,
+// поэтому нет смысла считать его трижды.
+export function quantize3(r, g, b, levels, x, y, strength, out) {
+  const safeLevels = Math.max(2, Math.floor(levels) || 2);
+  const step = 255 / (safeLevels - 1);
+  const wobble = bayerOffset(x, y, strength) * step;
+
+  const q = (v) => {
+    if (!Number.isFinite(v)) return 0;
+    const level = Math.round((v + wobble) / step);
+    return Math.round(Math.max(0, Math.min(safeLevels - 1, level)) * step);
+  };
+
+  out[0] = q(r);
+  out[1] = q(g);
+  out[2] = q(b);
+  return out;
+}
+
+// Таблицы для горячего цикла пола. quantize() вызывается на каждый пиксель
+// трижды, и два Math.round плюс двумерный BAYER4 съедали больше времени,
+// чем весь остальной рендер. Здесь все константы считаются один раз.
+//   wobble — 16 смещений Байера (по strength и step)
+//   lut    — уровень → значение канала
+export function makeQuantTables(levels, strength = 1) {
+  const safeLevels = Math.max(2, Math.floor(levels) || 2);
+  const step = 255 / (safeLevels - 1);
+
+  const wobble = new Float32Array(16);
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      wobble[(y << 2) | x] = (BAYER4[y][x] / 16 - 0.5) * strength * step;
+    }
+  }
+
+  const lut = new Float32Array(safeLevels);
+  for (let i = 0; i < safeLevels; i++) lut[i] = Math.round(i * step);
+
+  return { wobble, lut, levels: safeLevels, maxLevel: safeLevels - 1, step, inv: 1 / step };
+}
+
+// Один канал по готовым таблицам: без делений, без Math.round.
+export function quantizeFast(value, tables, x, y) {
+  if (!Number.isFinite(value)) return 0;
+  const w = tables.wobble[((y & 3) << 2) | (x & 3)];
+  // Умножение на обратный шаг вместо деления; +0.5 и | 0 — округление.
+  let level = ((value + w) * tables.inv + 0.5) | 0;
+  if (level < 0) level = 0;
+  else if (level > tables.maxLevel) level = tables.maxLevel;
+  return tables.lut[level];
+}
+
 // Детерминированное зерно: хеш от координат и канала.
 // Возвращает смещение в диапазоне примерно [-amount, amount].
 export function grain(x, y, channel = 0, amount = 3) {
@@ -80,4 +132,14 @@ export function murk(r, g, b, amount = 0.18) {
     g * (1 - a) + MURK_TINT[1] * a,
     b * (1 - a) + MURK_TINT[2] * a,
   ];
+}
+
+// То же, но без массива: вызывается на каждый пиксель пола.
+// murk() оставлен для тестов и читаемости, murkInto — для горячего цикла.
+export function murkInto(out, r, g, b, amount = 0.18) {
+  const a = Math.max(0, Math.min(1, amount));
+  out[0] = r * (1 - a) + MURK_TINT[0] * a;
+  out[1] = g * (1 - a) + MURK_TINT[1] * a;
+  out[2] = b * (1 - a) + MURK_TINT[2] * a;
+  return out;
 }

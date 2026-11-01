@@ -151,15 +151,17 @@ export function dropCount(weather, screenWidth = 640) {
 }
 
 // Положение капли: детерминированно от индекса и времени.
-export function dropPosition(index, time, wind, screenWidth = 640, screenHeight = 360) {
+// scale — множитель размера буфера: скорость падения в пикселях должна
+// расти вместе с разрешением, иначе на 720p дождь ползёт, а не льётся.
+export function dropPosition(index, time, wind, screenWidth = 640, screenHeight = 360, scale = 1) {
   const seed = (index * 2654435761) >>> 0;
   const x0 = seed % screenWidth;
-  const speedY = 420 + ((seed >>> 8) % 260);
-  const speedX = wind * 190;
+  const speedY = (420 + ((seed >>> 8) % 260)) * scale;
+  const speedX = wind * 190 * scale;
 
-  const y = (time * speedY + (seed >>> 16) % screenHeight) % (screenHeight + 90) - 90;
+  const y = (time * speedY + (seed >>> 16) % screenHeight) % (screenHeight + 90 * scale) - 90 * scale;
   const x =
-    (x0 + time * speedX + (((seed >>> 5) % 40) - 20)) % screenWidth;
+    (x0 + time * speedX + (((seed >>> 5) % 40) - 20) * scale) % screenWidth;
 
   return {
     x: x < 0 ? x + screenWidth : x,
