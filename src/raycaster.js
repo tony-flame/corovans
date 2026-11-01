@@ -11,6 +11,10 @@ const SCREEN_H = 720;
 const FOV_PLANE = 0.66;
 const MAX_DIST = 40;
 
+// Дальше этого спрайт не рисуется: туман его уже съел, а работа настоящая.
+// В лесу без отсечки проходило 475 спрайтов из 496 — каждый с filter.
+const SPRITE_MAX_DIST = 26;
+
 // Пиксели интерфейса заданы в «старых» единицах 640×360 и умножаются
 // на UI_SCALE. Так оружие, полосы подозрения и голова лошади остаются
 // того же размера относительно экрана, а не превращаются в игрушки.
@@ -440,17 +444,20 @@ export class Renderer {
       const gable = Math.abs(ray.wallX - 0.5) * 2;
       const hasRoof = tallMul <= 1.5;
 
-      for (let y = y0; y <= y1; y++) {
+      // Стена считается блоками 2×2 по вертикали: у собора высота в девять
+      // тайлов — это 1300 пикселей на колонку, и каждый проходил полный
+      // расчёт цвета. Блок 2×2 режет работу вчетверо без потери детализации
+      // относительно прежнего разрешения 640×360.
+      for (let y = y0; y <= y1; y += 2) {
         const texY = ((texPos | 0) & 63);
-        texPos += step;
         const c = texture[(texY << 6) + texX];
+        texPos += step * 2;
 
         // Затенение к полу: стена перестаёт быть плоской.
         const occlusion = wallOcclusion((y - wallTop) / span, 0.4);
         const shade = baseShade * occlusion * tileLight;
 
         // ── Двускатная крыша ──
-        // Верхняя четверть стены — фронтон: черепица, конёк, свес.
         // У высоких зданий (собор, ратуша) крыши нет: их фронтон начинался
         // бы на четырёхэтажной высоте и висел чёрной полосой через экран.
         const roofT = (y - wallTop) / span;
@@ -485,6 +492,12 @@ export class Renderer {
         const row = y * SCREEN_W;
         buf[row + x] = px;
         if (x + 1 < SCREEN_W) buf[row + x + 1] = px;
+        // Вторая строка блока.
+        if (y + 1 <= y1) {
+          const row2 = row + SCREEN_W;
+          buf[row2 + x] = px;
+          if (x + 1 < SCREEN_W) buf[row2 + x + 1] = px;
+        }
       }
     }
   }
@@ -604,11 +617,15 @@ export class Renderer {
     for (const item of list) {
       item.dist = (item.x - player.x) ** 2 + (item.y - player.y) ** 2;
     }
-    list.sort((a, b) => b.dist - a.dist);
+    // Дальние спрайты выбрасываются ДО сортировки: сортировать 500 объектов,
+    // чтобы потом отбросить 470 по дистанции, — работа впустую.
+    const maxDistSq = SPRITE_MAX_DIST * SPRITE_MAX_DIST;
+    const visible = list.filter((item) => item.dist <= maxDistSq);
+    visible.sort((a, b) => b.dist - a.dist);
 
     const invDet = 1 / (player.planeX * player.dirY - player.dirX * player.planeY);
 
-    for (const item of list) {
+    for (const item of visible) {
       const sprite = this.sprites[item.sprite];
       if (!sprite) continue;
 

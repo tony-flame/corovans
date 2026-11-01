@@ -26,8 +26,10 @@ import {
   isTrader,
   isBeggar,
   isRumormonger,
+  CIVILIAN_PANIC_RANGE,
 } from "../src/civilian.js";
 import { PERSON_KINDS, PERSON_W, PERSON_H } from "../src/person.js";
+import { moveActor, isSolid } from "../src/world.js";
 import {
   createWorld,
   canStand,
@@ -182,6 +184,58 @@ test("гражданские: неподвижные не двигаются", (
   for (let i = 0; i < 50; i++) stepCivilian(c, 0.05);
   assert.equal(c.x, x);
   assert.equal(c.y, y);
+});
+
+test("гражданские: убегают от титана", () => {
+  const c = createCivilian("greengrocer", 50, 50, null, 1);
+  const startX = c.x;
+  // Титан в трёх тайлах западнее.
+  const threat = { x: 47, y: 50, alive: true };
+
+  for (let i = 0; i < 20; i++) stepCivilian(c, 0.05, threat);
+
+  assert.ok(c.x > startX, `должен бежать от титана, а сдвинулся на ${(c.x - startX).toFixed(2)}`);
+  assert.equal(c.state, "flee");
+});
+
+test("гражданские: далёкого титана игнорируют", () => {
+  const c = createCivilian("greengrocer", 50, 50, null, 1);
+  const threat = { x: 50 - CIVILIAN_PANIC_RANGE - 5, y: 50, alive: true };
+  const startX = c.x;
+  for (let i = 0; i < 20; i++) stepCivilian(c, 0.05, threat);
+  assert.equal(c.x, startX, "неподвижный без угрозы стоит на месте");
+  assert.notEqual(c.state, "flee");
+});
+
+test("гражданские: успокаиваются, когда титан ушёл", () => {
+  const c = createCivilian("peasant_w", 50, 50, [[50, 50], [54, 50]], 1);
+  const threat = { x: 48, y: 50, alive: true };
+
+  stepCivilian(c, 0.05, threat);
+  assert.equal(c.state, "flee");
+
+  // Титан далеко — паника заканчивается, маршрут продолжается.
+  const away = { x: 0, y: 0, alive: true };
+  stepCivilian(c, 0.05, away);
+  assert.notEqual(c.state, "flee");
+});
+
+test("гражданские: паника не заводит в стену", () => {
+  const world = createWorld();
+  // Дом занимает 49..53 по x, 110..114 по y. Гражданский стоит восточнее,
+  // титан напирает с востока — бегство упирается в западную стену дома.
+  world.civilians = [createCivilian("peasant_w", 55.5, 112, null, 1)];
+  const c = world.civilians[0];
+  // ignore обязателен: персона блокирует всех, кроме себя.
+  assert.equal(canStand(world, c.x, c.y, c.r, c), true, "старт незаконный");
+  const threat = { x: 60, y: 112, alive: true };
+
+  for (let i = 0; i < 100; i++) stepCivilian(c, 0.05, threat, moveActor, world);
+
+  assert.equal(isSolid(world, c.x, c.y), false,
+    `гражданский залез в стену: ${c.x.toFixed(2)},${c.y.toFixed(2)}`);
+  assert.equal(canStand(world, c.x, c.y, c.r, c), true,
+    "гражданский стоит там, где его тело не помещается");
 });
 
 test("гражданские: фраза стабильна до смены визита", () => {

@@ -10,6 +10,11 @@ export const TITAN_SPEED = 0.9;
 export const TITAN_EAT_RANGE = 1.2;
 export const TITAN_EAT_TIME = 1.6;
 export const TITAN_SCALE = 2.4;
+// Радиус, в котором титан вообще замечает добычу. Без него он шёл
+// к ближайшей жертве через всю карту и вычищал население подчистую.
+export const TITAN_AGGRO_RANGE = 16;
+// Сколько он стоит, обнюхивая пустое место, прежде чем пойти дальше.
+export const TITAN_ROAM_TIME = 2.4;
 
 // Кого он НЕ трогает. Роли, без которых игра не работает.
 const IMMUNE_KINDS = new Set(["merchant", "courtesan", "titan"]);
@@ -67,6 +72,7 @@ export function createTitan(runSeed, x, y) {
     state: "roam", // roam | hunt | eat | pacified
     target: null,
     eatTimer: 0,
+    roamTimer: 0,
     angle: rng() * Math.PI * 2,
     // Спрайт переключается по состоянию, а не пересобирается в кадре.
     spriteKey: "titan_calm",
@@ -81,7 +87,9 @@ export function createTitan(runSeed, x, y) {
 }
 
 // Цель: ближайший, кого можно съесть. Мардо и куртизанки неприкосновенны.
-export function pickTarget(titan, candidates) {
+// maxRange ограничивает интерес: за его пределами титан бродит, а не
+// мчится через полкарты к одинокому крестьянину.
+export function pickTarget(titan, candidates, maxRange = TITAN_AGGRO_RANGE) {
   let best = null;
   let bestDist = Infinity;
 
@@ -90,6 +98,7 @@ export function pickTarget(titan, candidates) {
     if (IMMUNE_KINDS.has(c.kind)) continue;
 
     const d = Math.hypot(c.x - titan.x, c.y - titan.y);
+    if (d > maxRange) continue;
     if (d < bestDist) {
       bestDist = d;
       best = c;
@@ -100,7 +109,8 @@ export function pickTarget(titan, candidates) {
 }
 
 // Один шаг. Возвращает { titan, ate, victim } — ate=true, если кого-то съел.
-export function stepTitan(titan, candidates, dt) {
+// moveActor — из world.js: без него титан шёл к цели по прямой сквозь стены.
+export function stepTitan(titan, candidates, dt, moveActor = null, world = null) {
   if (!titan || !titan.alive) return { titan, ate: false, victim: null };
 
   // Договор: он больше не охотится.
@@ -112,10 +122,24 @@ export function stepTitan(titan, candidates, dt) {
 
   titan.steps += 1;
 
-  // Если цель мертва или исчезла — ищем новую.
-  if (!titan.target || !titan.target.alive) {
-    const picked = pickTarget(titan, candidates);
-    titan.target = picked.target;
+  // Если цель мертва, исчезла или ушла за радиус интереса — ищем новую.
+  if (titan.target && titan.target.alive) {
+    const td = Math.hypot(titan.target.x - titan.x, titan.target.y - titan.y);
+    if (td > TITAN_AGGRO_RANGE * 1.4) titan.target = null;
+  } else {
+    titan.target = null;
+  }
+
+  if (!titan.target) {
+    // Пауза перед новым поиском: он не должен перескакивать с жертвы
+    // на жертву в том же кадре. Но первую цель берём сразу — иначе
+    // титан простоит первые секунды, уставившись в пустоту.
+    titan.roamTimer = (titan.roamTimer || 0) + dt;
+    if (titan.roamTimer >= TITAN_ROAM_TIME || titan.steps <= 1) {
+      titan.roamTimer = 0;
+      const picked = pickTarget(titan, candidates);
+      titan.target = picked.target;
+    }
   }
 
   if (!titan.target) {
@@ -133,8 +157,15 @@ export function stepTitan(titan, candidates, dt) {
     titan.spriteKey = "titan_hunt";
     titan.angle = Math.atan2(dy, dx);
     // Он не быстрый, но идёт всегда: убежать можно, скрыться нельзя.
-    titan.x += (dx / dist) * titan.speed * dt;
-    titan.y += (dy / dist) * titan.speed * dt;
+    // Стены его останавливают — иначе углы ничего не значили.
+    const stepX = (dx / dist) * titan.speed * dt;
+    const stepY = (dy / dist) * titan.speed * dt;
+    if (moveActor && world) {
+      moveActor(world, titan, stepX, stepY);
+    } else {
+      titan.x += stepX;
+      titan.y += stepY;
+    }
     titan.eatTimer = 0;
     return { titan, ate: false, victim: null };
   }

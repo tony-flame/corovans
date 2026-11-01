@@ -12,10 +12,11 @@ import {
   TITAN_SPEED,
   TITAN_EAT_RANGE,
   TITAN_EAT_TIME,
+  TITAN_AGGRO_RANGE,
 } from "../src/titan.js";
 import { createRun, snapshotRun, restoreRun } from "../src/run.js";
 import { createProfile } from "../src/profile.js";
-import { createWorld } from "../src/world.js";
+import { createWorld, moveActor, canStand, isSolid } from "../src/world.js";
 
 test("титан: создаётся детерминированно", () => {
   const a = createTitan(777, 40, 34);
@@ -115,6 +116,108 @@ test("титан: мёртвая цель заменяется новой", () =
 
   const result = stepTitan(titan, [dead, alive], 0.1);
   assert.equal(result.titan.target, alive);
+});
+
+// ── Стены и радиус: то, что раньше не проверял ни один тест ──
+
+test("титан: не проходит сквозь стену", () => {
+  const world = createWorld();
+  // Дом в деревне: 49..53 по x, 110..114 по y. Титан крупный (r = 0.9),
+  // поэтому стартуем на законном расстоянии и целимся внутрь дома.
+  const titan = createTitan(1, 46.5, 112);
+  assert.equal(canStand(world, titan.x, titan.y, titan.r), true, "старт незаконный");
+  const inside = { kind: "guard", x: 51, y: 112, alive: true };
+
+  for (let i = 0; i < 200; i++) {
+    stepTitan(titan, [inside], 0.05, moveActor, world);
+  }
+
+  // Он мог обойти, но оказаться ВНУТРИ стены не имеет права.
+  assert.equal(isSolid(world, titan.x, titan.y), false,
+    `титан залез в стену: ${titan.x.toFixed(2)},${titan.y.toFixed(2)}`);
+  assert.equal(canStand(world, titan.x, titan.y, titan.r), true,
+    "титан стоит там, где его тело не помещается");
+  // И не должен просочиться на ту сторону дома.
+  assert.ok(titan.x < 53, `титан прошёл дом насквозь: x=${titan.x.toFixed(2)}`);
+});
+
+test("титан: без moveActor он по-прежнему двигается (совместимость)", () => {
+  const titan = createTitan(1, 0, 0);
+  const target = { kind: "guard", x: 10, y: 0, alive: true };
+  const before = titan.x;
+  stepTitan(titan, [target], 1);
+  assert.ok(titan.x > before, "движение должно работать и без карты");
+});
+
+test("титан: далёкую добычу он не замечает", () => {
+  const titan = createTitan(1, 0, 0);
+  // Втрое дальше радиуса интереса.
+  const far = { kind: "guard", x: TITAN_AGGRO_RANGE * 3, y: 0, alive: true };
+
+  const picked = pickTarget(titan, [far]);
+  assert.equal(picked.target, null, "за радиусом интереса цели нет");
+
+  const result = stepTitan(titan, [far], 1);
+  assert.equal(result.titan.state, "roam", "он должен бродить, а не охотиться");
+  assert.equal(result.titan.x, 0, "и не сдвигаться к далёкой жертве");
+});
+
+test("титан: близкую добычу замечает сразу", () => {
+  const titan = createTitan(1, 0, 0);
+  const near = { kind: "guard", x: TITAN_AGGRO_RANGE - 1, y: 0, alive: true };
+  const result = stepTitan(titan, [near], 0.1);
+  assert.equal(result.titan.target, near);
+  assert.equal(result.titan.state, "hunt");
+});
+
+test("титан: не перескакивает на новую цель мгновенно", () => {
+  const titan = createTitan(1, 0, 0);
+  const first = { kind: "guard", x: 5, y: 0, alive: true };
+  const second = { kind: "guard", x: 0, y: 5, alive: true };
+
+  stepTitan(titan, [first], 0.1);
+  assert.equal(titan.target, first);
+
+  // Первая цель погибла: он не должен в том же кадре взять вторую.
+  first.alive = false;
+  stepTitan(titan, [first, second], 0.1);
+  assert.equal(titan.target, null, "сначала пауза, потом новая цель");
+});
+
+test("титан: пауза заканчивается и он берёт новую цель", () => {
+  const titan = createTitan(1, 0, 0);
+  const first = { kind: "guard", x: 5, y: 0, alive: true };
+  const second = { kind: "guard", x: 0, y: 5, alive: true };
+
+  stepTitan(titan, [first], 0.1);
+  first.alive = false;
+
+  // Перебираем время: пауза должна истечь.
+  for (let i = 0; i < 40; i++) stepTitan(titan, [first, second], 0.1);
+  assert.equal(titan.target, second, "после паузы цель находится");
+});
+
+test("титан: ест гражданского, но не съедает всех за секунды", () => {
+  const world = createWorld();
+  world.civilians = [
+    { kind: "peasant_w", x: 8, y: 0, alive: true, r: 0.3 },
+    { kind: "peasant_m", x: 0, y: 8, alive: true, r: 0.3 },
+  ];
+  const player = { x: 100, y: 100, dead: false };
+  const titan = createTitan(1, 0, 0);
+
+  let eaten = 0;
+  // Пять секунд игры — это не «полкарты населения».
+  for (let i = 0; i < 100; i++) {
+    const prey = gatherPrey(world, player);
+    const r = stepTitan(titan, prey, 0.05, moveActor, world);
+    if (r.ate) {
+      eaten++;
+      r.victim.alive = false;
+    }
+  }
+
+  assert.ok(eaten <= 2, `за пять секунд съедено ${eaten} — слишком быстро`);
 });
 
 test("титан: gatherPrey собирает всех, кроме неприкосновенных", () => {

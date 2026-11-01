@@ -946,8 +946,10 @@ export function canStand(world, x, y, r, ignore = null) {
   }
 
   // Гражданские блокируют, но их радиус меньше, чтобы не запирать проходы.
+  // ignore обязателен: без него гражданский блокирует сам себя и не может
+  // сдвинуться ни на шаг (паника от титана упиралась в собственное тело).
   for (const person of world.civilians || []) {
-    if (!person.alive) continue;
+    if (!person.alive || person === ignore) continue;
     const dx = x - person.x;
     const dy = y - person.y;
     const pr = (person.r || 0.3) * 0.85;

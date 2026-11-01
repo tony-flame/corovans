@@ -1,7 +1,7 @@
 import { Renderer } from "./raycaster.js";
 import { Input } from "./input.js";
 import { Player } from "./player.js";
-import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand } from "./world.js";
+import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor } from "./world.js";
 import { updateActors, maxSuspicion } from "./enemies.js";
 import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
@@ -1697,9 +1697,13 @@ function updateWildlife(dt) {
 }
 
 // Гражданские: лёгкое блуждание по маршруту. Никакой агрессии.
+// Титан передаётся как угроза: без этого они стояли и ждали, пока их съедят.
 function updateCivilians(dt) {
+  const threat = world.titan && world.titan.alive && world.titan.state !== "pacified"
+    ? world.titan
+    : null;
   for (const person of world.civilians || []) {
-    stepCivilian(person, dt);
+    stepCivilian(person, dt, threat, moveActor, world);
   }
 }
 
@@ -1709,7 +1713,8 @@ function updateTitan(dt) {
   if (!titan) return;
 
   const prey = gatherPrey(world, player);
-  const result = stepTitan(titan, prey, dt);
+  // moveActor и world передаются в шаг: иначе титан ходит сквозь стены.
+  const result = stepTitan(titan, prey, dt, moveActor, world);
   world.titan = result.titan;
 
   if (result.ate && result.victim) {

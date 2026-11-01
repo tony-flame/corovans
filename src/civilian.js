@@ -177,10 +177,38 @@ export function createCivilians(seed = 0) {
   return list;
 }
 
+// Радиус, в котором гражданский замечает титана и убегает.
+export const CIVILIAN_PANIC_RANGE = 9;
+
 // Лёгкое блуждание: туда-обратно по маршруту, с паузами.
 // Никакой агрессии, никакого восприятия игрока.
-export function stepCivilian(civilian, dt) {
+// Но титана они боятся: иначе он методично съедал всех, кто не убегает.
+// threat — необязательный {x, y}: обычно сам титан. moveActor тоже
+// необязателен, без него бегство игнорирует стены.
+export function stepCivilian(civilian, dt, threat = null, moveActor = null, world = null) {
   if (!civilian || !civilian.alive) return civilian;
+
+  // Паника важнее маршрута: бежим от угрозы, пока она близко.
+  if (threat && threat.alive !== false) {
+    const tx = civilian.x - threat.x;
+    const ty = civilian.y - threat.y;
+    const td = Math.hypot(tx, ty);
+    if (td < CIVILIAN_PANIC_RANGE && td > 0.001) {
+      // Ровно в противоположную сторону, но не быстрее, чем умеет.
+      const panicSpeed = Math.max(civilian.speed, 1.35);
+      const stepX = (tx / td) * panicSpeed * dt;
+      const stepY = (ty / td) * panicSpeed * dt;
+      civilian.state = "flee";
+      civilian.angle = Math.atan2(ty, tx);
+      if (moveActor && world) moveActor(world, civilian, stepX, stepY, civilian.r);
+      else {
+        civilian.x += stepX;
+        civilian.y += stepY;
+      }
+      return civilian;
+    }
+    if (civilian.state === "flee") civilian.state = "idle";
+  }
 
   if (civilian.state === "pause") {
     civilian.idleTimer -= dt;
