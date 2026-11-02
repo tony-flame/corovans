@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "description": "Корованы: Тёмная дорога — сырой прототип (бета) браузерной игры в духе Daggerfall",
   "keywords": [
     "game",
@@ -20,8 +21,14 @@
   "scripts": {
     "start": "node scripts/serve.mjs",
     "start:python": "python -m http.server 8000",
+    "electron": "electron .",
+    "dist": "electron-packager . Corovans --platform=win32 --arch=x64 --out=dist --overwrite --asar --app-version=0.1.0 --icon=electron/icon.ico --ignore=\"^/(tests|scripts|docs|\\.git|dist|node_modules/electron|node_modules/electron-packager)\" --ignore=\"^/(AGENTS|README|CONTRIBUTING|rw)\\.md$\" --ignore=\"^/package-lock\\.json$\" --ignore=\"\\.log$\" --ignore=\"^/\\.vscode\" --ignore=\"^/\\.idea\"",
     "check": "node scripts/check.mjs",
     "test": "node --test",
     "verify": "npm run check && npm test"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-packager": "^17.1.2"
   }
 }

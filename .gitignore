@@ -4,6 +4,9 @@ node_modules/
 Thumbs.db
 desktop.ini
 
+# Собранное приложение
+dist/
+
 # Локальные заметки и артефакты отладки
 .idea/
 .vscode/

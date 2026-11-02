@@ -1,14 +1,18 @@
 // Синтаксическая проверка всех JS-модулей без запуска браузера.
-import { readdirSync } from "node:fs";
+// Каталог electron добавлен отдельно: main там .cjs, а фильтр ниже
+// принимает только .js/.mjs.
+import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const dirs = ["src", "tests", "scripts"];
-const files = dirs.flatMap((dir) =>
-  readdirSync(dir)
-    .filter((name) => name.endsWith(".js") || name.endsWith(".mjs"))
-    .map((name) => join(dir, name))
-);
+const dirs = ["src", "tests", "scripts", "electron"];
+const files = dirs
+  .filter((dir) => existsSync(dir))
+  .flatMap((dir) =>
+    readdirSync(dir)
+      .filter((name) => name.endsWith(".js") || name.endsWith(".mjs") || name.endsWith(".cjs"))
+      .map((name) => join(dir, name))
+  );
 
 let failed = false;
 for (const file of files) {
