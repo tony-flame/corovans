@@ -86,45 +86,70 @@ export class UI {
     this.fameText = "";
   }
 
+  // Запись в DOM только при изменении. Раньше update() безусловно делал
+  // 62 записи на кадр (3720 в секунду): каждое style.width и textContent
+  // инвалидирует стиль, а рядом идут чтения classList — получался layout thrash.
+  setText(el, value) {
+    if (!el) return;
+    if (el.__lastText === value) return;
+    el.__lastText = value;
+    el.textContent = value;
+  }
+
+  setWidth(el, percent) {
+    if (!el) return;
+    const value = `${percent}%`;
+    if (el.__lastWidth === value) return;
+    el.__lastWidth = value;
+    el.style.width = value;
+  }
+
+  setHidden(el, hidden) {
+    if (!el) return;
+    if (el.__lastHidden === hidden) return;
+    el.__lastHidden = hidden;
+    el.classList.toggle("hidden", hidden);
+  }
+
   update(state) {
     const p = state.player;
     const hp = Math.max(0, Math.ceil(p.health));
-    this.hpFill.style.width = `${Math.max(0, (p.health / p.maxHealth) * 100)}%`;
-    this.hpText.textContent = `${hp} / ${p.maxHealth}`;
-    this.stFill.style.width = `${Math.max(0, (p.stamina / p.maxStamina) * 100)}%`;
-    this.stText.textContent = `${Math.ceil(p.stamina)}`;
+    this.setWidth(this.hpFill, Math.max(0, (p.health / p.maxHealth) * 100));
+    this.setText(this.hpText, `${hp} / ${p.maxHealth}`);
+    this.setWidth(this.stFill, Math.max(0, (p.stamina / p.maxStamina) * 100));
+    this.setText(this.stText, `${Math.ceil(p.stamina)}`);
 
     if (this.noiseFill) {
       const noise = Math.max(0, Math.min(1, state.noiseLevel || 0));
-      this.noiseFill.style.width = `${noise * 100}%`;
-      if (this.noiseText) this.noiseText.textContent = this.noiseLabel(noise);
+      this.setWidth(this.noiseFill, noise * 100);
+      if (this.noiseText) this.setText(this.noiseText, this.noiseLabel(noise));
     }
 
-    this.goldEl.textContent = `${state.gold} зм.`;
+    this.setText(this.goldEl, `${state.gold} зм.`);
 
     // Запас бодрости: отдельная полоска, только когда он есть.
     if (this.overhealEl) {
       const over = Math.max(0, Math.min(25, p.overheal || 0));
       if (over > 0.05) {
-        this.overhealEl.classList.remove("hidden");
-        this.overhealFill.style.width = `${(over / 25) * 100}%`;
-        this.overhealText.textContent = `+${Math.ceil(over)}`;
+        this.setHidden(this.overhealEl, false);
+        this.setWidth(this.overhealFill, (over / 25) * 100);
+        this.setText(this.overhealText, `+${Math.ceil(over)}`);
       } else {
-        this.overhealEl.classList.add("hidden");
+        this.setHidden(this.overhealEl, true);
       }
     }
 
-    if (this.repEl) this.repEl.textContent = `Репутация: ${state.reputation || 0}`;
+    if (this.repEl) this.setText(this.repEl, `Репутация: ${state.reputation || 0}`);
     if (this.phaseEl) {
       const wet = state.wet && state.weatherLabel ? ` · ${state.weatherLabel}` : "";
-      this.phaseEl.textContent = `${phaseLabel(state.phase || "day")}${wet}`;
+      this.setText(this.phaseEl, `${phaseLabel(state.phase || "day")}${wet}`);
     }
 
     if (state.wanted > 0) {
-      this.wantedEl.classList.remove("hidden");
-      this.wantedEl.textContent = `Розыск: ${"★".repeat(Math.min(5, state.wanted))}`;
+      this.setHidden(this.wantedEl, false);
+      this.setText(this.wantedEl, `Розыск: ${"★".repeat(Math.min(5, state.wanted))}`);
     } else {
-      this.wantedEl.classList.add("hidden");
+      this.setHidden(this.wantedEl, true);
     }
 
     if (this.bleedEl) {
@@ -150,15 +175,15 @@ export class UI {
     if (!this.contractEl) return;
     const contract = state.activeContract;
     if (!contract) {
-      this.contractEl.classList.add("hidden");
+      this.setHidden(this.contractEl, true);
       return;
     }
-    this.contractEl.classList.remove("hidden");
+    this.setHidden(this.contractEl, false);
     const deadline =
       contract.deadline && state.contractTimeLeft !== null && state.contractTimeLeft !== undefined
         ? ` · осталось ${Math.max(0, Math.ceil(state.contractTimeLeft))} с`
         : "";
-    this.contractEl.textContent = `Контракт: ${contractName(contract.type)} — ${contract.description}${deadline}`;
+    this.setText(this.contractEl, `Контракт: ${contractName(contract.type)} — ${contract.description}${deadline}`);
   }
 
   renderFame(state) {

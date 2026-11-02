@@ -17,6 +17,9 @@ const MAX_DIST = 40;
 // В лесу без отсечки проходило 475 спрайтов из 496 — каждый с filter.
 const SPRITE_MAX_DIST = 26;
 
+// Предел кэша затемнённых спрайтов. При вытеснении удаляется один ключ.
+const SPRITE_SHADE_LIMIT = 40 * 8;
+
 // Пиксели интерфейса заданы в «старых» единицах 640×360 и умножаются
 // на UI_SCALE. Так оружие, полосы подозрения и голова лошади остаются
 // того же размера относительно экрана, а не превращаются в игрушки.
@@ -100,6 +103,8 @@ export class Renderer {
     // и на каждом спрайте он стоил дороже, чем весь рейкастинг.
     // 8 ступеней яркости на спрайт, дальше обычный drawImage.
     this.spriteShade = new Map();
+    // Счётчик идентификаторов: ключ кэша строится по объекту, не по имени.
+    this.spriteShadeId = 0;
     // Звёзды: массив пар координат, пересобирается только при смене сида.
     this.stars = null;
     this.starsSeed = null;
@@ -127,7 +132,8 @@ export class Renderer {
         // потолком текстуры это делало картинку тусклой.
         vig[row + x] = vignette(x, y, SCREEN_W, SCREEN_H, 0.12);
         // Зерно 0.5 из 255 — ниже порога восприятия: таблица на 3.7 МБ
-        // работала впустую. 2.5 даёт заметную «плёнку».
+        // работала впустую. Здесь храним форму шума в диапазоне ±2.5,
+        // а масштаб применяется в finishFrame пропорционально яркости.
         grainTable[row + x] = grain(x, y, 0, 2.5);
       }
     }
@@ -138,49 +144,38 @@ export class Renderer {
 
   finishFrame() {
     this.buildVignetteTable();
-    const data = this.imageData.data;
+    // Работаем через Uint32Array поверх того же буфера, что и пол со стенами.
+    const buf = this.buffer;
     const vig = this.vignetteTable;
     const gr = this.grainTable;
 
-    // Блок 2×2: виньетка и зерно меняются плавно, шаг в два пикселя
-    // не виден. Четыре пикселя обрабатываются одним проходом.
-    for (let y = 0; y < SCREEN_H; y += 2) {
+    // Зерно ПРОПОРЦИОНАЛЬНО яркости, а не абсолютно. Абсолютные ±2.5 на
+    // ночном полу с яркостью 15 — это 30% разброса на каждый пиксель:
+    // шум получался контрастнее самой сцены и читался как сетка.
+    // Так же работает настоящее зерно плёнки: на тенях его не видно.
+    const grainK = 0.045;
+
+    for (let y = 0; y < SCREEN_H; y++) {
       const row = y * SCREEN_W;
-      const row2 = y + 1 < SCREEN_H ? row + SCREEN_W : row;
-      for (let x = 0; x < SCREEN_W; x += 2) {
+      for (let x = 0; x < SCREEN_W; x++) {
         const idx = row + x;
+        const c = buf[idx];
         const v = vig[idx];
-        const g = gr[idx];
-        const i = idx << 2;
-        let r = data[i] * v + g;
-        let gg = data[i + 1] * v + g;
-        let b = data[i + 2] * v + g;
+        const srcR = c & 255;
+        const srcG = (c >> 8) & 255;
+        const srcB = (c >> 16) & 255;
+        // Множитель зерна: 1 ± 0.045. Один множитель на все каналы —
+        // это монохромное зерно, как на чёрно-белой плёнке.
+        const gm = 1 + (gr[idx] / 2.5) * grainK;
+        const shade = v * gm;
+
+        let r = srcR * shade;
+        let gg = srcG * shade;
+        let b = srcB * shade;
         r = r < 0 ? 0 : r > 255 ? 255 : r;
         gg = gg < 0 ? 0 : gg > 255 ? 255 : gg;
         b = b < 0 ? 0 : b > 255 ? 255 : b;
-        data[i] = r;
-        data[i + 1] = gg;
-        data[i + 2] = b;
-
-        // сосед справа
-        const i1 = i + 4;
-        if (x + 1 < SCREEN_W) {
-          data[i1] = r;
-          data[i1 + 1] = gg;
-          data[i1 + 2] = b;
-        }
-        // соседи снизу
-        if (row2 !== row) {
-          const i2 = (row2 + x) << 2;
-          data[i2] = r;
-          data[i2 + 1] = gg;
-          data[i2 + 2] = b;
-          if (x + 1 < SCREEN_W) {
-            data[i2 + 4] = r;
-            data[i2 + 5] = gg;
-            data[i2 + 6] = b;
-          }
-        }
+        buf[idx] = (255 << 24) | (b << 16) | (gg << 8) | r;
       }
     }
   }
@@ -595,10 +590,12 @@ export class Renderer {
       let lightHere = 1;
       let lightCounter = 0;
 
-      // Пол рисуется блоками 2×2: буфер 1280×720, работаем 640×360.
-      // Ровно столько детализации было на прежнем разрешении, поэтому
-      // картинка ничего не теряет, а тяжёлый цикл идёт вчетверо быстрее.
-      for (let hx = 0, x = 0; x < SCREEN_W; hx++, x += 2) {
+      // Пол рисуется по полному разрешению, блокируется только выборка
+      // света. Раньше здесь стоял шаг 2 по X и один тексель на блок 2×2:
+      // попиксельный шум текстуры травы при таком увеличении превращался
+      // в шахматную сетку по всему полу. Блоки оправданы там, где значение
+      // плавное (свет, виньетка), но не там, где шумит сама текстура.
+      for (let hx = 0, x = 0; x < SCREEN_W; hx++, x++) {
         // Счётчик вместо модуля: остаток от деления в горячем цикле дорог.
         if (useLight && lightCounter++ === 0) {
           lightHere = sampleLight(this.lightmap, floorX, floorY);
@@ -633,14 +630,11 @@ export class Renderer {
           quantizeFast(mb, this.qt, hx, y)
         );
         buf[row + x] = px;
-        if (x + 1 < SCREEN_W) buf[row + x + 1] = px;
-        // Вторая строка блока: та же выборка, другая строка буфера.
-        if (row2 !== row) {
-          buf[row2 + x] = px;
-          if (x + 1 < SCREEN_W) buf[row2 + x + 1] = px;
-        }
-        floorX += stepX * 2;
-        floorY += stepY * 2;
+        // Вторая строка блока: освещение плавное по Y, текстура — нет,
+        // поэтому по вертикали блок остаётся, но тексель пересчитывается.
+        if (row2 !== row) buf[row2 + x] = px;
+        floorX += stepX;
+        floorY += stepY;
       }
     }
   }
@@ -786,13 +780,26 @@ export class Renderer {
   // дальше рисуется обычным drawImage.
   shadedSprite(sprite, key, brightness) {
     // 8 ступеней: разница между соседними не видна, а кэш маленький.
-    const step = Math.max(0.25, Math.min(1.15, Math.round(brightness * 8) / 8));
-    const cacheKey = `${key}:${step}`;
+    const step = Math.max(0.25, Math.min(1, Math.round(brightness * 8) / 8));
+
+    // Осветлять не умеем: rgba с отрицательной альфой — no-op, который
+    // каждый раз пересчитывался. Просто возвращаем оригинал.
+    if (step >= 1) return sprite;
+
+    // Ключ от идентичности объекта, а не от имени: спрайт под тем же именем
+    // может быть заменён (титан, куртизанки при смене каравана), и кэш
+    // начал бы отдавать копию старого.
+    if (sprite.__shadeId === undefined) sprite.__shadeId = ++this.spriteShadeId;
+    const cacheKey = `${sprite.__shadeId}:${step}`;
+
     const cached = this.spriteShade.get(cacheKey);
     if (cached) return cached;
 
-    // Больше 40 ключей — забываем всё: кэш не должен расти бесконечно.
-    if (this.spriteShade.size > 40 * 8) this.spriteShade.clear();
+    // Вытесняем ОДИН самый старый ключ. Прежний clear() сбрасывал весь кэш,
+    // и в одном кадре пересобирались все спрайты — заметный рывок.
+    if (this.spriteShade.size >= SPRITE_SHADE_LIMIT) {
+      this.spriteShade.delete(this.spriteShade.keys().next().value);
+    }
 
     const c = document.createElement("canvas");
     c.width = sprite.width;
