@@ -17,6 +17,15 @@ function moveToward(world, actor, tx, ty, speed, dt) {
     // обход препятствия
     moveActor(world, actor, -ny * speed * dt * 0.8, nx * speed * dt * 0.8);
   }
+
+  // Шаги стража: звук был написан, но не вызывался ниоткуда.
+  // Интервал считается по пройденному пути, а не по таймеру, иначе
+  // на медленном шаге шаги строчились бы, а на быстром пропадали.
+  actor.stepDistance = (actor.stepDistance || 0) + moved;
+  if (moved > 0.001 && actor.stepDistance > 1.6) {
+    actor.stepDistance = 0;
+    actor.onStep?.();
+  }
   return dist;
 }
 
@@ -188,7 +197,16 @@ function updateDriver(game, actor, dt) {
     }
     const nx = dx / Math.max(0.001, dist);
     const ny = dy / Math.max(0.001, dist);
+    const beforeX = actor.x;
+    const beforeY = actor.y;
     moveActor(world, actor, nx * actor.speed * dt, ny * actor.speed * dt);
+    // Шаги и в погоне (см. комментарий в moveToward).
+    const moved = Math.hypot(actor.x - beforeX, actor.y - beforeY);
+    actor.stepDistance = (actor.stepDistance || 0) + moved;
+    if (moved > 0.001 && actor.stepDistance > 1.6) {
+      actor.stepDistance = 0;
+      actor.onStep?.();
+    }
     actor.angle = Math.atan2(ny, nx);
     return;
   }

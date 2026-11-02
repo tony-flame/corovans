@@ -1815,6 +1815,22 @@ function updateGame(dt) {
     game.noiseTimer = Math.max(game.noiseTimer, 0.35);
   }
 
+  // Шаги стражей слышны только вблизи и только когда рядом нет тишины.
+  // Без отсечки по дистанции топот шёл бы со всей карты.
+  for (const actor of world.actors) {
+    if (actor.kind !== "guard" && actor.kind !== "village_guard") {
+      actor.onStep = null;
+      continue;
+    }
+    actor.onStep = () => {
+      if (game.paused || !game.started) return;
+      const d = Math.hypot(actor.x - player.x, actor.y - player.y);
+      if (d > 12) return;
+      // Тихо подкрадывающемуся игроку шаги стражи не мешают спать.
+      audio.guardStep(d);
+    };
+  }
+
   const aiContext = {
     world,
     player,
@@ -1894,6 +1910,12 @@ function uiState() {
 }
 
 let last = performance.now();
+// В деревне музыка спокойнее, на тракте — темнее. Граница совпадает
+// с зоной деревни из world.js, но чуть шире: площадь и рынок тоже «свои».
+function isInTown(x, y) {
+  return x >= 44 && x <= 90 && y >= 104 && y <= 146;
+}
+
 function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
@@ -1927,6 +1949,15 @@ function frame(now) {
     ui.setObjective(objectiveText());
     // Дождь звучит только когда он есть и игра не на паузе.
     audio.rain(Boolean(game.weather && game.weather.raining) && game.started && !game.paused, game.weather ? game.weather.intensity : 0);
+
+    // Фон: смена настроения по фазе и месту. music() сам решает, пора ли
+    // что-то менять, поэтому вызывать каждый кадр безопасно.
+    if (game.started && !game.paused && !game.gameOver) {
+      const inTown = isInTown(player.x, player.y);
+      audio.stepMusic(run ? phaseOf(run.dayTime) : "day", inTown);
+    } else {
+      audio.musicStop(1.5);
+    }
   }
   requestAnimationFrame(frame);
 }
@@ -1976,6 +2007,7 @@ if (debugEnabled) {
     player,
     world,
     renderer,
+    audio,
     saveCheckpoint,
     newRun,
     attack: performAttack,
