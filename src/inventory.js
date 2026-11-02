@@ -1,5 +1,8 @@
 // Инвентарь и добыча. Модуль чистый — используется и в браузере, и в node:test.
-export const DEFAULT_CAPACITY = 24;
+// Вместимость была 24 при добыче на 9.5 кг даже на tier 5 — влезало всё,
+// и выбора «что взять» не возникало ни разу. 14 заставляет выбирать
+// с первого каравана, но не превращает обыск в издевательство.
+export const DEFAULT_CAPACITY = 14;
 
 export function createInventory(capacity = DEFAULT_CAPACITY) {
   return { capacity, items: [] };
@@ -40,13 +43,16 @@ export function canCarry(inv, item) {
   return Boolean(item) && totalWeight(inv) + item.weight <= inv.capacity + 1e-9;
 }
 
+// Вес тюков поднят примерно вдвое против прежнего. При вместимости 24
+// и добыче на 9.5 кг выбора не было вообще — теперь обыск заставляет
+// решать, что унести, а что оставить.
 export const LOOT_TABLE = [
-  { id: "silk", name: "Тюк шёлка", value: 34, weight: 1.5, kind: "goods" },
-  { id: "wine", name: "Бочонок вина", value: 26, weight: 3, kind: "goods" },
-  { id: "spice", name: "Ящик специй", value: 44, weight: 2, kind: "goods" },
-  { id: "furs", name: "Связка мехов", value: 30, weight: 2.5, kind: "goods" },
-  { id: "silver", name: "Столовое серебро", value: 52, weight: 1, kind: "goods" },
-  { id: "tools", name: "Ящик инструментов", value: 22, weight: 4, kind: "goods" },
+  { id: "silk", name: "Тюк шёлка", value: 34, weight: 2.7, kind: "goods" },
+  { id: "wine", name: "Бочонок вина", value: 26, weight: 5.4, kind: "goods" },
+  { id: "spice", name: "Ящик специй", value: 44, weight: 3.6, kind: "goods" },
+  { id: "furs", name: "Связка мехов", value: 30, weight: 4.5, kind: "goods" },
+  { id: "silver", name: "Столовое серебро", value: 52, weight: 1.8, kind: "goods" },
+  { id: "tools", name: "Ящик инструментов", value: 22, weight: 7.2, kind: "goods" },
 ];
 
 // Детерминированный выбор добычи: rng обязан быть функцией, возвращающей [0,1).

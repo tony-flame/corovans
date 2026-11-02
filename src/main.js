@@ -163,7 +163,7 @@ function newRun() {
   player.reset(world.spawn);
   world.tier = 1;
   run.archetype = "road_camp";
-  spawnCamp(world, 1, tuningFor(run.style, 2));
+  spawnCamp(world, 1, tuningFor(run.style));
   respawnWildlifeAndCourtesan();
   game.weather = createWeather(run.seed);
 
@@ -185,7 +185,7 @@ function continueRun() {
   rng = createRng(run.seed);
   rng.restore(run.rngState);
 
-  spawnCamp(world, run.tier, tuningFor(run.style, run.tier + 1));
+  spawnCamp(world, run.tier, tuningFor(run.style));
   respawnWildlifeAndCourtesan();
   // Погода выводится из сида рана: F5 с чекпоинта даёт тот же дождь,
   // иначе перезагрузка стала бы кнопкой «сделать сухо».
@@ -915,7 +915,7 @@ function cheatContext() {
     profile,
     setTier(value) {
       run.tier = value;
-      spawnCamp(world, run.tier, tuningFor(run.style, run.tier + 1));
+      spawnCamp(world, run.tier, tuningFor(run.style));
       run.archetype = world.archetype;
       respawnWildlifeAndCourtesan();
     },
@@ -1153,7 +1153,7 @@ function tradeState() {
 }
 
 function priceModifier() {
-  return (1 + bonuses().priceBonus) * pricesAt(run.dayTime) * tuningFor(run.style, run.tier + 1).priceBonus;
+  return (1 + bonuses().priceBonus) * pricesAt(run.dayTime) * tuningFor(run.style).priceBonus;
 }
 
 // ── Экономика ───────────────────────────────────────────────────────
@@ -1231,7 +1231,11 @@ function payFine() {
 
 function startLoot(second = false) {
   const tier = run.tier;
-  const count = 2 + tier + tuningFor(run.style, tier + 1).lootCount;
+  // Раньше было `2 + tier`, и одновременно rollLoot умножал цену на
+  // 1 + (tier-1)*0.25. Два множителя по тиру сразу: на tier 3 доход
+  // удваивался скачком, и вся игра проходилась за пять караванов.
+  // Теперь количество растёт в полтора раза медленнее.
+  const count = 2 + Math.floor(tier / 2) + tuningFor(run.style).lootCount;
   game.lootBuffer = rollLoot(tier, rng, count);
   game.lootSecondWagon = second;
 
@@ -1287,7 +1291,7 @@ function finishLoot() {
   } else {
     noteStyle("silent_loot");
     run.counters.silentLoots += 1;
-    const bonus = Math.round(coin * (tuningFor(run.style, run.tier + 1).silentBonus - 1));
+    const bonus = Math.round(coin * (tuningFor(run.style).silentBonus - 1));
     if (bonus > 0) {
       run.gold += bonus;
       ui.message(`Тихо и чисто: +${bonus} зм. за бесшумность.`);
@@ -1486,7 +1490,7 @@ function killActor(actor) {
   actor.hp = 0;
   actor.state = "dead";
 
-  const tuning = tuningFor(run.style, run.tier + 1);
+  const tuning = tuningFor(run.style);
   const drop = Math.round((6 + run.tier * 3 + Math.floor(rng() * 6)) * tuning.killDrop);
   run.gold += drop;
   run.wanted = Math.min(5, run.wanted + 1);
@@ -1598,7 +1602,7 @@ function die() {
 
   rng = createRng(run.seed);
   rng.restore(run.rngState);
-  spawnCamp(world, run.tier, tuningFor(run.style, run.tier + 1));
+  spawnCamp(world, run.tier, tuningFor(run.style));
   syncRunToWorld();
 
   if (playerPositionValid(world, run.player)) {
@@ -1869,7 +1873,7 @@ function updateGame(dt) {
         run.caravanTimer = 3;
       } else {
         run.tier += 1;
-        spawnCamp(world, run.tier, tuningFor(run.style, run.tier + 1));
+        spawnCamp(world, run.tier, tuningFor(run.style));
         run.archetype = world.archetype;
         respawnWildlifeAndCourtesan();
         run.wagonLooted = false;
