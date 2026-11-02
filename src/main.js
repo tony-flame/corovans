@@ -291,15 +291,17 @@ function updateCourtesanVariant() {
     const bloodKey = `${variant.spriteKey}_blood`;
     courtesan.spriteKey = bloodied ? bloodKey : cleanKey;
 
-    // Старые ключи этого места удаляем, иначе копится мусор при каждом караване.
-    for (const key of Object.keys(renderer.sprites)) {
-      if (key.startsWith(`courtesan_`) && !key.endsWith("_clean") && !key.endsWith("_blood")) {
-        delete renderer.sprites[key];
-      }
+    // Удаляем РОВНО свои прошлые ключи. Прежнее условие никогда не
+    // выполнялось: всё, что пишется в renderer.sprites, оканчивается на
+    // _clean или _blood, поэтому под фильтр ничего не попадало. За шесть
+    // караванов набиралось 48 canvas вместо 8.
+    if (courtesan.spriteKeys) {
+      for (const key of courtesan.spriteKeys) delete renderer.sprites[key];
     }
 
     renderer.sprites[cleanKey] = buildCourtesan(variant, { bloodied: false });
     renderer.sprites[bloodKey] = buildCourtesan(variant, { bloodied: true });
+    courtesan.spriteKeys = [cleanKey, bloodKey];
   }
 }
 
@@ -337,13 +339,15 @@ function acceptContract(index) {
   const offer = run.contractOffer[index];
   if (!offer || run.activeContract) return;
 
-  run.activeContract = { ...offer, state: "active", acceptedAt: run.dayTime };
+  run.activeContract = { ...offer, state: "active", acceptedAt: run.dayTime, acceptedClock: game.clockTotal };
   run.contractOffer = [];
   run.counters.killsSinceAccept = 0;
   run.counters.lootsSinceAccept = 0;
   run.counters.chaseSinceAccept = false;
   run.counters.driverKilledSinceAccept = false;
   run.counters.acceptedAt = run.dayTime;
+  // Монотонный отпечаток времени: dayTime замыкается, clockTotal нет.
+  run.counters.acceptedClock = game.clockTotal;
 
   audio.ui();
   ui.message(`Взят заказ: ${contractName(offer.type)}. ${offer.description}`);
@@ -361,6 +365,10 @@ function contractSnapshot() {
     items: run.inventory.items,
     dayTime: run.dayTime,
     acceptedAt: run.counters.acceptedAt,
+    // Монотонное время: не замыкается через 240 с, поэтому дедлайн
+    // нельзя обойти сменой суток.
+    clockTotal: game.clockTotal,
+    acceptedClock: run.counters.acceptedClock,
   };
 }
 
@@ -371,7 +379,11 @@ function evaluateContract() {
   const result = checkContract(contract, snap);
 
   if (contract.deadline && result.status === "active") {
-    game.contractTimeLeft = Math.max(0, contract.deadline - (run.dayTime - contract.acceptedAt));
+    // Остаток считается по тому же монотонному счётчику, иначе HUD врал.
+    const elapsed = Number.isFinite(run.counters.acceptedClock)
+      ? Math.max(0, game.clockTotal - run.counters.acceptedClock)
+      : Math.max(0, run.dayTime - contract.acceptedAt);
+    game.contractTimeLeft = Math.max(0, contract.deadline - elapsed);
   } else {
     game.contractTimeLeft = null;
   }
@@ -1000,6 +1012,7 @@ function showTitanQuestion() {
   ui.openTitan({
     question: q.text,
     answers: q.answers,
+    hint: q.hint,
     progress: `Вопрос ${d.index + 1} из ${d.questions.length}`,
   });
 }
@@ -1732,6 +1745,9 @@ function updateTitan(dt) {
 
 function updateGame(dt) {
   game.time += dt;
+  // Монотонное время игры: не замыкается, в отличие от dayTime.
+  // Нужно для дедлайнов контрактов — иначе смена суток их обнуляет.
+  game.clockTotal = (game.clockTotal || 0) + dt;
   run.dayTime = (run.dayTime + dt) % 240;
 
   // Лайтмап пересобирается НЕ каждый кадр: заливка 40 000 тайлов плюс

@@ -138,6 +138,30 @@ test("contracts: 'до рассвета' истекает по времени", 
   assert.equal(checkContract(contract, { dayTime: 200, acceptedAt: 10, lootsSinceAccept: 1 }).status, "complete");
 });
 
+test("contracts: дедлайн не обходится сменой суток", () => {
+  // Регрессия: elapsed считался как dayTime - acceptedAt, а dayTime
+  // замыкается через 240 с. Контракт на 90 с можно было просрочить на 300.
+  const contract = { type: CONTRACT_TYPES.BEFORE_DAWN, state: "active", deadline: 90, reward: { gold: 120, rep: 3 }, id: "c3" };
+
+  // Взяли на 200-й секунде, прошло 100 с: сутки перескочили, dayTime стал 60.
+  // По старой логике elapsed = 60 - 200 < 0 -> clamp 0 -> "активен". Это баг.
+  const wrapped = { dayTime: 60, acceptedAt: 200 };
+  assert.equal(
+    checkContract(contract, wrapped).status,
+    "failed",
+    "дедлайн нельзя обойти сменой суток"
+  );
+
+  // С монотонным счётчиком всё честно в обе стороны.
+  assert.equal(checkContract(contract, { clockTotal: 350, acceptedClock: 300 }).status, "active");
+  assert.equal(checkContract(contract, { clockTotal: 500, acceptedClock: 300 }).status, "failed");
+  // Сутки перескочили, но монотонное время говорит правду.
+  assert.equal(
+    checkContract(contract, { dayTime: 5, acceptedAt: 230, clockTotal: 400, acceptedClock: 250 }).status,
+    "failed"
+  );
+});
+
 test("contracts: предметный заказ требует конкретный лут", () => {
   const contract = {
     type: CONTRACT_TYPES.SPECIFIC_ITEM,

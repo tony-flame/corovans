@@ -542,6 +542,15 @@ button:disabled {
   margin: 12px 0 18px;
 }
 
+/* Подсказка титана: тише вопроса, но читаемо. */
+.titan-hint {
+  margin: -10px 0 18px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(216, 178, 90, 0.35);
+  font-style: italic;
+  line-height: 1.45;
+}
+
 #titan-answers button {
   display: block;
   width: 100%;

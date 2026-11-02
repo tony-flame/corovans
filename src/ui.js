@@ -384,6 +384,14 @@ export class UI {
     this.$("titan-question").textContent = view.question;
     this.$("titan-progress").textContent = view.progress;
 
+    // Подсказка написана в данных вопроса, но раньше не доходила до экрана.
+    // Она превращает вопросы из рулетки (3.7% угадать всё) в проверку.
+    const hintEl = this.$("titan-hint");
+    if (hintEl) {
+      hintEl.textContent = view.hint || "";
+      hintEl.classList.toggle("hidden", !view.hint);
+    }
+
     const answers = this.$("titan-answers");
     answers.innerHTML = "";
     for (let i = 0; i < view.answers.length; i++) {

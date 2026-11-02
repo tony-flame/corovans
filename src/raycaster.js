@@ -555,10 +555,13 @@ export class Renderer {
     const map = world.map;
 
     const startY = Math.max(0, Math.floor(horizon) + 1);
-    // Свет раз в 8 пикселей по X и раз в 4 по Y: 1/32 выборок.
-    // Он мягкий и низкочастотный, ступенек не видно, а вызовов в 32 раза меньше.
+    // Свет раз в 8 пикселей по X и раз в 4 блока по Y.
+    // ВАЖНО: привязка к индексу блока, а не к абсолютному y. Раньше здесь
+    // было `y % LIGHT_STEP_Y === 0` при шаге `y += 2`, и свет включался
+    // только на чётных строках — а чётность зависит от bobY. Пока игрок
+    // шёл, освещение пола дёргалось на ~7 Гц.
     const LIGHT_STEP_X = 8;
-    const LIGHT_STEP_Y = 4;
+    const LIGHT_EVERY_BLOCKS = 2; // один блок из двух получает новую выборку
 
     for (let y = startY; y < SCREEN_H; y += 2) {
       const p = y - horizon;
@@ -584,8 +587,10 @@ export class Renderer {
       const fb = this.fog.b * fogT * fogDim;
       const row = y * SCREEN_W;
       const row2 = y + 1 < SCREEN_H ? row + SCREEN_W : row;
-      const useLight = Boolean(this.lightmap) && (y % LIGHT_STEP_Y === 0);
-      const bayerRow = (y & 3) << 2;
+      // Номер блока по вертикали от начала пола: не зависит от того,
+      // чётная ли строка выпала на горизонт.
+      const blockRow = (y - startY) >> 1;
+      const useLight = Boolean(this.lightmap) && blockRow % LIGHT_EVERY_BLOCKS === 0;
 
       let lightHere = 1;
       let lightCounter = 0;
@@ -753,10 +758,14 @@ export class Renderer {
         const mr = sr * this.murkK + this.murkR;
         const mg = sg * this.murkK + this.murkG;
         const mb = sb * this.murkK + this.murkB;
+        // Дизер привязан к номеру сэмпла в стене, а не к экранному y:
+        // иначе узор Байера «плывёт» при любой смене drawStart (покачивание,
+        // прыжок, наклон). sampleRow двигается только внутри одной стены.
+        const sampleRow = (y - y0) >> 1;
         const px = pack(
-          quantizeFast(mr, this.qt, hx, y),
-          quantizeFast(mg, this.qt, hx, y),
-          quantizeFast(mb, this.qt, hx, y)
+          quantizeFast(mr, this.qt, hx, sampleRow),
+          quantizeFast(mg, this.qt, hx, sampleRow),
+          quantizeFast(mb, this.qt, hx, sampleRow)
         );
         const row = y * SCREEN_W;
         buf[row + x] = px;

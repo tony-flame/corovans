@@ -13,6 +13,11 @@
 //   }
 
 import { createRng, hashSeed, pick } from "./rng.js";
+import { CYCLE_LENGTH } from "./daynight.js";
+
+// Длина суток в секундах. Нужна, чтобы посчитать прошедшее время через
+// переход суток, когда монотонного счётчика в снапшоте нет.
+const CYCLE_SECONDS = CYCLE_LENGTH;
 
 export const CONTRACT_TYPES = {
   CLEAN: "clean",
@@ -158,7 +163,18 @@ export function checkContract(contract, snapshot) {
   const items = snap.items || [];
 
   if (contract.type === CONTRACT_TYPES.BEFORE_DAWN) {
-    const elapsed = Math.max(0, (snap.dayTime || 0) - (snap.acceptedAt || 0));
+    // Прошедшее время по монотонному счётчику. Раньше было
+    // `dayTime - acceptedAt`, а dayTime замыкается через 240 с: контракт
+    // с дедлайном 90 с можно было просрочить на 300 с и он оставался жив.
+    let elapsed;
+    if (Number.isFinite(snap.clockTotal)) {
+      elapsed = Math.max(0, snap.clockTotal - (snap.acceptedClock ?? 0));
+    } else {
+      // Запасной путь без монотонного счётчика: разница по dayTime,
+      // но с учётом перехода через полный круг суток.
+      const raw = (snap.dayTime || 0) - (snap.acceptedAt || 0);
+      elapsed = raw >= 0 ? raw : raw + CYCLE_SECONDS;
+    }
     if (loots > 0) return { status: "complete", reason: "" };
     if (elapsed > contract.deadline) {
       return { status: "failed", reason: "Время вышло" };
