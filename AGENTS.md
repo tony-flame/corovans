@@ -11,11 +11,22 @@ User-facing text, comments and `README.md` are Russian. Keep new strings in Russ
 - `npm start` — dev server on port 8000 via `scripts/serve.mjs`, which sends `Cache-Control: no-store`. Open `http://localhost:8000`.
 - `npm run start:python` — legacy `python -m http.server 8000`. **It sends no cache headers**, so Chrome keeps stale ES modules (`304 Not Modified`) and you debug code that isn't running. Prefer `npm start`.
 - `npm run verify` — `npm run check && npm test`; the only real gate, run it before committing.
-- `npm run check` — `node --check` on every `.js`/`.mjs` in `src/`, `tests/`, `scripts/` (hardcoded dir list in `scripts/check.mjs`; new dirs must be added there).
+- `npm run check` — `node --check` on every `.js`/`.mjs`/`.cjs` in `src/`, `tests/`, `scripts/`, `electron/` (hardcoded dir list in `scripts/check.mjs`; new dirs must be added there).
 - `npm test` — `node --test` (auto-discovers `tests/*.test.js`). One file: `node --test tests/systems.test.js`.
+
+### Desktop build (Electron)
+
+- `npm install` — **required for the desktop build only.** This is the one exception to "no npm dependencies": Electron cannot exist without it. The browser build still needs nothing.
+- `npm run electron` — runs the game in an Electron window.
+- `npm run dist` — builds `dist/Corovans-win32-x64/Corovans.exe` via `electron-packager` (asar, win32-x64). ~250 MB folder.
+- `npm run icon` — regenerates `electron/icon.png` and `electron/icon.ico` from `scripts/make-icon.mjs` (raw PNG/ICO written by hand, no image tooling).
+- `electron/main.cjs` serves the game over a **custom `app://` protocol**. `win.loadFile()` does **not** work: Chromium blocks ES modules on `file://` by CORS and the window stays blank. Do not "simplify" this to `loadFile`.
+- `webPreferences.sandbox` is **false** on purpose — with `sandbox: true` the renderer dies with `Renderer process launch-failed` and no window appears. `contextIsolation: true` + `nodeIntegration: false` carry the security here.
+- The window uses `useContentSize: true` and 1280×720 so the canvas buffer maps 1:1; `applyCanvasScale` then reports scale 1.
+
 - `?debug=1` (any value works) exposes `window.__corovans`: `game`, `run`, `profile`, `ui`, `input`, `player`, `world`, `renderer`, `saveCheckpoint`, `debugStyle`.
 
-ES modules require HTTP; `index.html` over `file://` fails. There is no browser test runner, so rendering/UI/input changes can only be validated by playing the page.
+ES modules require HTTP; `index.html` over `file://` fails. In Electron that is solved by the `app://` protocol (see above), not by `loadFile`. There is no browser test runner, so rendering/UI/input changes can only be validated by playing the page.
 
 `main.js` logs `[corovans] build <stamp>` and exposes `window.__corovans.build` under `?debug=1`. If the stamp is not the one you just wrote, the browser is serving a cached module — reload hard before debugging behavior.
 
