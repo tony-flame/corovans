@@ -1900,6 +1900,8 @@ function frame(now) {
     lightmap: game.lightmap,
     weather: game.weather,
     mounted: Boolean(game.mounted),
+    // Сид нужен небу: звёзды и луна фиксированы на забег, иначе они мерцают.
+    seed: run ? run.seed : 0,
     suspicionSource: (actor) => (actor.asleep ? 0 : actor.suspicion),
     showSuspicion: game.started && !game.gameOver,
   });

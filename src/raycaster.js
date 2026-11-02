@@ -5,6 +5,8 @@ import { castRay } from "./ray.js";
 import { quantize, quantizeFast, makeQuantTables, murk, murkInto, wallOcclusion, applyGrain, vignette, clampChannel, grain, MURK_TINT } from "./dither.js";
 import { sampleLight } from "./lighting.js";
 import { dropCount, dropPosition, dropLength, skyTint, snowflakePosition, snowflakeCount } from "./weather.js";
+import { createRng, hashSeed } from "./rng.js";
+import { HORSE_CAMERA_LIFT } from "./horse.js";
 
 const SCREEN_W = 1280;
 const SCREEN_H = 720;
@@ -30,13 +32,46 @@ const DITHER_LEVELS = 16;
 // Доля высоты стены, занятая крышей-фронтоном.
 const ROOF_HEIGHT = 0.22;
 
-// Подмес «сумрака» в предвычисленном виде: горячий цикл пола не должен
-// вызывать murk() на каждый пиксель.
-const MURK_AMOUNT = 0.16;
-const MURK_K = 1 - MURK_AMOUNT;
-const MURK_R = MURK_TINT[0] * MURK_AMOUNT;
-const MURK_G = MURK_TINT[1] * MURK_AMOUNT;
-const MURK_B = MURK_TINT[2] * MURK_AMOUNT;
+// ── Подмес «сумрака» ──
+// Раньше это была константа 0.16 для всех фаз: днём она зря съедала
+// насыщенность (максимум яркости в кадре был 133/255 в полдень),
+// а ночью, наоборот, была слабее нужного.
+//
+// MURK_DEPTH — доля подмеса на фазу. Днём ноль: солнце даёт чистый цвет.
+// Ночью ОЧЕНЬ мало: MURK_TINT светлый (58,61,42), и при большой доле он
+// добавлял 27 единиц яркости поверх тёмной сцены — земля светилась втрое
+// ярче неба. Холод ночи даёт небо и лайтмап, а не подмес.
+const MURK_DEPTH = { dawn: 0.14, day: 0, dusk: 0.18, night: 0.05 };
+
+// Экспозиция по фазам. День поднят выше единицы, иначе даже освещённая
+// стена не пробивает потолок текстуры (158) и картинка выглядит недосвеченной.
+const EXPOSURE = { dawn: 0.95, day: 1.32, dusk: 0.88, night: 0.6 };
+
+// Палитра неба по фазам суток. Раньше небо было одинаковым днём и ночью:
+// ночью оно оказывалось СВЕТЛЕЕ земли, и картинка читалась как «закат,
+// который забыли выключить». Три опорные точки: зенит, середина, горизонт.
+const SKY_PALETTE = {
+  dawn: {
+    top: [26, 30, 48],
+    mid: [96, 74, 70],
+    low: [196, 138, 96],
+  },
+  day: {
+    top: [42, 74, 118],
+    mid: [96, 132, 168],
+    low: [186, 196, 196],
+  },
+  dusk: {
+    top: [30, 26, 52],
+    mid: [120, 70, 76],
+    low: [206, 128, 82],
+  },
+  night: {
+    top: [6, 8, 18],
+    mid: [14, 18, 34],
+    low: [28, 34, 52],
+  },
+};
 
 // Освещённость по фазам суток: множитель к цвету сцены.
 const LIGHT_LEVELS = { dawn: 0.82, day: 1, dusk: 0.72, night: 0.45 };
@@ -65,6 +100,11 @@ export class Renderer {
     // и на каждом спрайте он стоил дороже, чем весь рейкастинг.
     // 8 ступеней яркости на спрайт, дальше обычный drawImage.
     this.spriteShade = new Map();
+    // Звёзды: массив пар координат, пересобирается только при смене сида.
+    this.stars = null;
+    this.starsSeed = null;
+    this.phase = "day";
+    this.seed = 0;
     // Таблицы дизера и константы подмеса: в горячем цикле пола нельзя
     // считать их на каждый пиксель.
     this.qt = makeQuantTables(DITHER_LEVELS, this.ditherStrength);
@@ -83,8 +123,12 @@ export class Renderer {
     for (let y = 0; y < SCREEN_H; y++) {
       const row = y * SCREEN_W;
       for (let x = 0; x < SCREEN_W; x++) {
-        vig[row + x] = vignette(x, y, SCREEN_W, SCREEN_H, 0.2);
-        grainTable[row + x] = grain(x, y, 0, 0.5);
+        // 0.2 снимало пятую часть яркости с углов — в сумме с прежним
+        // потолком текстуры это делало картинку тусклой.
+        vig[row + x] = vignette(x, y, SCREEN_W, SCREEN_H, 0.12);
+        // Зерно 0.5 из 255 — ниже порога восприятия: таблица на 3.7 МБ
+        // работала впустую. 2.5 даёт заметную «плёнку».
+        grainTable[row + x] = grain(x, y, 0, 2.5);
       }
     }
     this.vignetteTable = vig;
@@ -207,11 +251,22 @@ export class Renderer {
     // Прыжок поднимает камеру, наклон сдвигает горизонт (shear), а не поворачивает.
     this.jumpZ = player.jumpZ || 0;
     // Верхом сдвигаем горизонт: сидишь выше, земля уходит вниз.
-    const lift = state.mounted ? 20 : 0;
+    const lift = state.mounted ? HORSE_CAMERA_LIFT : 0;
     const horizon = SCREEN_H * 0.5 + player.bobY - (player.pitch || 0) - lift;
     this.light = LIGHT_LEVELS[light] !== undefined ? LIGHT_LEVELS[light] : 1;
+    // Экспозиция и подмес сумрака зависят от фазы: считаются раз в кадр,
+    // а не на каждый пиксель.
+    const exposure = EXPOSURE[light] !== undefined ? EXPOSURE[light] : 1;
+    this.light *= exposure;
+    const murkAmount = MURK_DEPTH[light] !== undefined ? MURK_DEPTH[light] : 0.16;
+    this.murkK = 1 - murkAmount;
+    this.murkR = MURK_TINT[0] * murkAmount;
+    this.murkG = MURK_TINT[1] * murkAmount;
+    this.murkB = MURK_TINT[2] * murkAmount;
     this.lightmap = lightmap;
     this.time = time;
+    this.phase = light;
+    this.seed = state.seed || 0;
     this.renderSky(player, horizon, weather);
     this.renderFloor(world, player, horizon);
     this.renderWalls(world, player, horizon);
@@ -237,40 +292,131 @@ export class Renderer {
     }
   }
 
+  // Звёзды считаются один раз на сид и переиспользуются:
+  // 70 точек — это дешевле, чем выглядит, но пересчитывать их каждый кадр
+  // всё равно незачем.
+  buildStars() {
+    if (this.starsSeed === this.seed && this.stars) return;
+    this.starsSeed = this.seed;
+    const rng = createRng(hashSeed(`${this.seed}:stars`));
+    const list = [];
+    for (let i = 0; i < 70; i++) {
+      list.push({
+        // Верхние 80% неба: у горизонта звёзд почти не видно.
+        x: rng() * SCREEN_W,
+        y: rng() * SCREEN_H * 0.42,
+        bright: 0.25 + rng() * 0.75,
+        // Своя фаза мерцания — иначе все звёзды мигают синхронно.
+        phase: rng() * Math.PI * 2,
+      });
+    }
+    this.stars = list;
+  }
+
+  // Смешение уже записанного пикселя к цвету. Нужно для звёзд, луны и солнца:
+  // они ложатся поверх градиента, не заливая его заново.
+  blendPixel(buf, index, r, g, b, a) {
+    if (index < 0 || index >= buf.length) return;
+    const c = buf[index];
+    const dr = c & 255;
+    const dg = (c >> 8) & 255;
+    const db = (c >> 16) & 255;
+    buf[index] = pack(
+      (dr + (r - dr) * a) | 0,
+      (dg + (g - dg) * a) | 0,
+      (db + (b - db) * a) | 0
+    );
+  }
+
   renderSky(player, horizon, weather = null) {
     const buf = this.buffer;
     const tint = skyTint(weather);
-    const dim = tint.dim;
     const grey = tint.grey;
+    const palette = SKY_PALETTE[this.phase] || SKY_PALETTE.day;
 
-    // Дождь делает небо серее и темнее.
+    // Дождь выбеливает и приглушает небо, но не отменяет фазу суток.
+    const k = 1 - grey * 0.45;
     const top = [
-      24 * dim + grey * 70,
-      31 * dim + grey * 74,
-      46 * dim + grey * 78,
+      palette.top[0] * k + grey * 118,
+      palette.top[1] * k + grey * 122,
+      palette.top[2] * k + grey * 128,
     ];
-    const bottom = [
-      132 * dim + grey * 96,
-      116 * dim + grey * 100,
-      88 * dim + grey * 104,
+    const mid = [
+      palette.mid[0] * k + grey * 126,
+      palette.mid[1] * k + grey * 130,
+      palette.mid[2] * k + grey * 136,
     ];
+    const low = [
+      palette.low[0] * k + grey * 132,
+      palette.low[1] * k + grey * 136,
+      palette.low[2] * k + grey * 140,
+    ];
+
     const h = Math.max(1, Math.floor(horizon));
+    // Туман на стыке: последние строки неба уходят в цвет тумана,
+    // иначе небо обрывается о землю резкой линией.
+    const fogBand = Math.min(28, h);
+    const fogStart = h - fogBand;
+    const fr = this.fog.r;
+    const fg = this.fog.g;
+    const fb = this.fog.b;
 
     for (let y = 0; y < h; y++) {
       const t = Math.pow(y / h, 1.4);
-      const r = (top[0] + (bottom[0] - top[0]) * t) | 0;
-      const g = (top[1] + (bottom[1] - top[1]) * t) | 0;
-      const b = (top[2] + (bottom[2] - top[2]) * t) | 0;
-      const c = pack(r, g, b);
+      // Два отрезка: верх→середина (до 55%), середина→низ.
+      let r;
+      let g;
+      let b;
+      if (t < 0.55) {
+        const u = t / 0.55;
+        r = top[0] + (mid[0] - top[0]) * u;
+        g = top[1] + (mid[1] - top[1]) * u;
+        b = top[2] + (mid[2] - top[2]) * u;
+      } else {
+        const u = (t - 0.55) / 0.45;
+        r = mid[0] + (low[0] - mid[0]) * u;
+        g = mid[1] + (low[1] - mid[1]) * u;
+        b = mid[2] + (low[2] - mid[2]) * u;
+      }
+
+      if (y >= fogStart) {
+        const u = (y - fogStart) / fogBand;
+        const m = u * u * 0.7;
+        r += (fr - r) * m;
+        g += (fg - g) * m;
+        b += (fb - b) * m;
+      }
+
+      const c = pack(r | 0, g | 0, b | 0);
       const row = y * SCREEN_W;
       for (let x = 0; x < SCREEN_W; x++) buf[row + x] = c;
     }
 
+    // ── Звёзды: только ночью и в сумерках ──
+    const starAlpha = this.phase === "night" ? 1 : this.phase === "dusk" || this.phase === "dawn" ? 0.35 : 0;
+    if (starAlpha > 0.01) {
+      this.buildStars();
+      for (const s of this.stars) {
+        const sy = s.y | 0;
+        if (sy < 0 || sy >= h) continue;
+        // Медленное мерцание: не мигание, а дыхание.
+        const twinkle = 0.72 + Math.sin(this.time * 0.9 + s.phase) * 0.28;
+        const a = s.bright * twinkle * starAlpha;
+        const idx = sy * SCREEN_W + (s.x | 0);
+        this.blendPixel(buf, idx, 236, 240, 255, Math.min(0.9, a));
+      }
+    }
+
+    // ── Солнце и луна ──
+    this.drawCelestialBody(buf, h, grey);
+
     // Дальние холмы, привязанные к мировому углу.
     // pack() считался в самом внутреннем цикле — почти полмиллиона вызовов
     // на кадр. Цвета постоянные, выносим их наружу и заливаем строками.
-    const hillFar = pack(43, 52, 43);
-    const hillNear = pack(31, 41, 32);
+    // Ночью холмы почти растворяются в небе, иначе силуэт «светится».
+    const hillK = Math.max(0.25, this.light);
+    const hillFar = pack((43 * hillK) | 0, (52 * hillK) | 0, (43 * hillK) | 0);
+    const hillNear = pack((31 * hillK) | 0, (41 * hillK) | 0, (32 * hillK) | 0);
     const tanHalf = FOV_PLANE;
     for (let x = 0; x < SCREEN_W; x++) {
       const cameraX = (2 * x) / SCREEN_W - 1;
@@ -282,6 +428,116 @@ export class Renderer {
       for (let y = start1; y < h; y++) buf[y * SCREEN_W + x] = hillFar;
       for (let y = start2; y < h; y++) buf[y * SCREEN_W + x] = hillNear;
     }
+  }
+
+  // Солнце днём, луна ночью. Оба — заливка круга поверх неба.
+  drawCelestialBody(buf, h, grey) {
+    // В дождь небесных тел не видно.
+    if (grey > 0.5) return;
+
+    const isNight = this.phase === "night";
+    const rng = createRng(hashSeed(`${this.seed}:moon`));
+
+    // Положение по горизонтали своё у каждого забега, но стабильное.
+    const cx = (0.18 + rng() * 0.64) * SCREEN_W;
+    // Высота: днём выше, на рассвете и закате — у горизонта.
+    const highFactor = this.phase === "day" ? 0.34 : 0.62;
+    const cy = h * highFactor;
+
+    const radius = isNight ? 16 : 22;
+    const r2 = radius * radius;
+
+    // Цвет: луна холодная, солнце тёплое.
+    const core = isNight ? [226, 230, 240] : [255, 238, 190];
+    const glow = isNight ? [120, 132, 160] : [255, 190, 110];
+
+    // Гало — два концентрических круга с малой альфой.
+    const glowR = radius * 2.6;
+    const glowR2 = glowR * glowR;
+    const x0 = Math.max(0, Math.floor(cx - glowR));
+    const x1 = Math.min(SCREEN_W - 1, Math.ceil(cx + glowR));
+    const y0 = Math.max(0, Math.floor(cy - glowR));
+    const y1 = Math.min(h - 1, Math.ceil(cy + glowR));
+
+    for (let y = y0; y <= y1; y++) {
+      const dy = y - cy;
+      const row = y * SCREEN_W;
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - cx;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > glowR2) continue;
+        const idx = row + x;
+        if (d2 <= r2) {
+          this.blendPixel(buf, idx, core[0], core[1], core[2], 0.92);
+        } else {
+          // Квадратичное затухание: плотно у диска, прозрачно к краю.
+          const t = 1 - Math.sqrt(d2) / glowR;
+          this.blendPixel(buf, idx, glow[0], glow[1], glow[2], t * t * 0.35);
+        }
+      }
+    }
+
+    // Лунные кратеры: пара тёмных пятен, чтобы диск не был плоским.
+    if (isNight) {
+      const craters = [
+        [-0.3, -0.25, 0.28],
+        [0.22, 0.15, 0.22],
+        [0.05, -0.42, 0.16],
+      ];
+      for (const [ox, oy, size] of craters) {
+        const px = cx + ox * radius;
+        const py = cy + oy * radius;
+        const cr = radius * size;
+        const cy0 = Math.max(y0, Math.floor(py - cr));
+        const cy1 = Math.min(y1, Math.ceil(py + cr));
+        for (let y = cy0; y <= cy1; y++) {
+          const dy = y - py;
+          for (let x = Math.max(x0, Math.floor(px - cr)); x <= Math.min(x1, Math.ceil(px + cr)); x++) {
+            const dx = x - px;
+            if (dx * dx + dy * dy > cr * cr) continue;
+            this.blendPixel(buf, y * SCREEN_W + x, 150, 158, 176, 0.3);
+          }
+        }
+      }
+
+      // Серп: отсекаем часть диска небом. Полный круг выглядел как второе
+      // солнце — фаза сразу читается как луна.
+      const cutR = radius * 0.92;
+      const cutX = cx + radius * 0.52;
+      const cutY = cy - radius * 0.18;
+      const cutR2 = cutR * cutR;
+      for (let y = y0; y <= y1; y++) {
+        const dy = y - cutY;
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - cutX;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > cutR2) continue;
+          // Внутри диска луны и внутри выреза — возвращаем небо.
+          const ddx = x - cx;
+          const ddy = y - cy;
+          if (ddx * ddx + ddy * ddy > r2) continue;
+          // Мягкий край выреза: 1 пиксель сглаживания.
+          const edge = Math.sqrt(d2) - cutR;
+          if (edge > 0) continue;
+          const idx = y * SCREEN_W + x;
+          this.blendPixel(buf, idx, this.skyColorAt(y), this.skyColorAt(y, 1), this.skyColorAt(y, 2), 0.95);
+        }
+      }
+    }
+  }
+
+  // Цвет неба в строке — для возврата «выреза» луны.
+  // Берём из палитры, а не из буфера: буфер под луной уже закрашен.
+  skyColorAt(y, channel = 0) {
+    const palette = SKY_PALETTE[this.phase] || SKY_PALETTE.day;
+    const h = Math.max(1, SCREEN_H * 0.5);
+    const t = Math.pow(Math.min(1, y / h), 1.4);
+    if (t < 0.55) {
+      const u = t / 0.55;
+      return palette.top[channel] + (palette.mid[channel] - palette.top[channel]) * u;
+    }
+    const u = (t - 0.55) / 0.45;
+    return palette.mid[channel] + (palette.low[channel] - palette.mid[channel]) * u;
   }
 
   renderFloor(world, player, horizon) {
@@ -314,11 +570,18 @@ export class Renderer {
       let floorY = player.y + rowDistance * rayDirY0;
 
       const fogT = Math.max(0, Math.min(0.8, (rowDistance - 7) / 34));
-      const rowShade = Math.max(0.34, 1 - rowDistance * 0.028) * this.light;
+      // Пол 0.34 и стены 0.28 — это НЕ «минимальная яркость сцены»,
+      // а защита от нуля. При ночной экспозиции 0.6 они не давали земле
+      // потемнеть: пол оставался втрое светлее неба. Опускаем до значений,
+      // которые не режут ночь, но всё ещё не дают полной черноты.
+      const rowShade = Math.max(0.04, 1 - rowDistance * 0.028) * this.light;
       const fogK = 1 - fogT;
-      const fr = this.fog.r * fogT;
-      const fg = this.fog.g * fogT;
-      const fb = this.fog.b * fogT;
+      // Цвет тумана тоже гаснет по фазе: ночью дымка не может быть
+      // ярче самой сцены, иначе пол светится из ниоткуда.
+      const fogDim = this.light;
+      const fr = this.fog.r * fogT * fogDim;
+      const fg = this.fog.g * fogT * fogDim;
+      const fb = this.fog.b * fogT * fogDim;
       const row = y * SCREEN_W;
       const row2 = y + 1 < SCREEN_H ? row + SCREEN_W : row;
       const useLight = Boolean(this.lightmap) && (y % LIGHT_STEP_Y === 0);
@@ -355,9 +618,9 @@ export class Renderer {
         const sb = ((c >> 16) & 255) * shade * fogK + fb;
 
         // Тёмный подмес без массива: murk() аллоцировал объект на пиксель.
-        const mr = sr * MURK_K + MURK_R;
-        const mg = sg * MURK_K + MURK_G;
-        const mb = sb * MURK_K + MURK_B;
+        const mr = sr * this.murkK + this.murkR;
+        const mg = sg * this.murkK + this.murkG;
+        const mb = sb * this.murkK + this.murkB;
 
         const px = pack(
           quantizeFast(mr, this.qt, hx, y),
@@ -433,12 +696,14 @@ export class Renderer {
         || walls[tile] || walls[TILE.STONE];
       const fogT = Math.max(0, Math.min(0.82, (perpDist - 6) / 32));
       const fogK = 1 - fogT;
-      const baseShade = Math.max(0.28, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022)) * this.light;
+      const baseShade = Math.max(0.05, (side === 1 ? 0.72 : 1) * (1 - perpDist * 0.022)) * this.light;
       // Свет по тайлам: факелы, костёр, окна. Интерполяция уже внутри.
       const tileLight = sampleLight(this.lightmap, ray.mapX + 0.5, ray.mapY + 0.5);
-      const fr = this.fog.r * fogT;
-      const fg = this.fog.g * fogT;
-      const fb = this.fog.b * fogT;
+      // Туман гаснет вместе со сценой (см. комментарий в renderFloor).
+      const fogDim = this.light;
+      const fr = this.fog.r * fogT * fogDim;
+      const fg = this.fog.g * fogT * fogDim;
+      const fb = this.fog.b * fogT * fogDim;
 
       const y0 = Math.max(0, drawStart);
       const y1 = Math.min(SCREEN_H - 1, drawEnd);
@@ -485,9 +750,9 @@ export class Renderer {
         }
 
         // Подмес сумрака и дизеринг: быстрые версии без массивов.
-        const mr = sr * MURK_K + MURK_R;
-        const mg = sg * MURK_K + MURK_G;
-        const mb = sb * MURK_K + MURK_B;
+        const mr = sr * this.murkK + this.murkR;
+        const mg = sg * this.murkK + this.murkG;
+        const mb = sb * this.murkK + this.murkB;
         const px = pack(
           quantizeFast(mr, this.qt, hx, y),
           quantizeFast(mg, this.qt, hx, y),
