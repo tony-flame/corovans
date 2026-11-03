@@ -93,7 +93,10 @@ import {
 // Не совпала с ожидаемой — браузер играет закешированные модули.
 const BUILD = "2026-11-03-fixes-1";
 
-const canvas = document.getElementById("game");const world = createWorld();
+const canvas = document.getElementById("game");
+const world = createWorld();
+// Заодно чиню склейку двух операторов в одну строку — она появилась
+// при прошлых правках и мешает читать.
 const player = new Player(world.spawn);
 const renderer = new Renderer(canvas);
 const audio = new AudioSys();
@@ -162,6 +165,8 @@ function newRun() {
 
   player.reset(world.spawn);
   world.tier = 1;
+  // Сид забега нужен миру: от него зависит, где встанет стоянка.
+  world.seed = run.seed;
   run.archetype = "road_camp";
   spawnCamp(world, 1, tuningFor(run.style));
   respawnWildlifeAndCourtesan();
@@ -185,6 +190,8 @@ function continueRun() {
   rng = createRng(run.seed);
   rng.restore(run.rngState);
 
+  // Тот же сид — та же площадка: перезагрузка не должна переставлять лагерь.
+  world.seed = run.seed;
   spawnCamp(world, run.tier, tuningFor(run.style));
   respawnWildlifeAndCourtesan();
   // Погода выводится из сида рана: F5 с чекпоинта даёт тот же дождь,

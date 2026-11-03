@@ -28,7 +28,7 @@ import {
   PRICE_MIN,
   PRICE_MAX,
 } from "../src/npc.js";
-import { createWorld, spawnCamp, hasPath, canStand, SPAWN, MERCHANT_POS, COURTESAN_POS, WAGON_BASE, MAP_W, MAP_H, isSolid, CAMP_LAYOUTS, nearestInteraction, ZONES, moveActor } from "../src/world.js";
+import { createWorld, spawnCamp, hasPath, canStand, SPAWN, MERCHANT_POS, COURTESAN_POS, WAGON_BASE, MAP_W, MAP_H, isSolid, CAMP_LAYOUTS, nearestInteraction, ZONES, moveActor, CAMP_SITES, campSiteFor } from "../src/world.js";
 import { updateActors, maxSuspicion } from "../src/enemies.js";
 
 test("wildlife: диспетчер не превращает животное в стражника", () => {
@@ -152,14 +152,75 @@ test("map: зоны внутри границ", () => {
 });
 
 test("map: архетипы лагерей не выходят за зону стойбища", () => {
-  for (const [id, layout] of Object.entries(CAMP_LAYOUTS)) {
-    for (const [ox, oy] of layout.guardSpots) {
-      const x = WAGON_BASE.x + ox;
-      const y = WAGON_BASE.y + oy;
-      assert.ok(x > ZONES.CAMP.x0 && x < ZONES.CAMP.x1, `${id}: страж за зоной лагеря по x (${x})`);
-      assert.ok(y > ZONES.CAMP.y0 && y < ZONES.CAMP.y1, `${id}: страж за зоной лагеря по y (${y})`);
+  // Стоянка теперь переезжает между площадками CAMP_SITES, поэтому зону
+  // проверяем для КАЖДОЙ, а не только для базовой точки.
+  for (const site of CAMP_SITES) {
+    for (const [id, layout] of Object.entries(CAMP_LAYOUTS)) {
+      for (const [ox, oy] of layout.guardSpots) {
+        const x = site.x + ox;
+        const y = site.y + oy;
+        assert.ok(
+          x > ZONES.CAMP.x0 && x < ZONES.CAMP.x1,
+          `${id} @ ${site.x},${site.y}: страж за зоной лагеря по x (${x})`
+        );
+        assert.ok(
+          y > ZONES.CAMP.y0 && y < ZONES.CAMP.y1,
+          `${id} @ ${site.x},${site.y}: страж за зоной лагеря по y (${y})`
+        );
+      }
     }
   }
+});
+
+test("лагерь: стоянка переезжает от сида и остаётся достижимой", () => {
+  // Собрать все площадки перебором сидов.
+  const seen = new Map();
+  for (let seed = 1; seed < 400 && seen.size < CAMP_SITES.length; seed++) {
+    const site = campSiteFor(seed, 1);
+    const key = `${site.x},${site.y}`;
+    if (!seen.has(key)) seen.set(key, seed);
+  }
+  assert.equal(seen.size, CAMP_SITES.length, "перебором сидов не нашлись все площадки");
+
+  for (const [key, seed] of seen) {
+    const world = createWorld();
+    world.seed = seed;
+    spawnCamp(world, 1);
+
+    // Фургон стоит на выбранной площадке.
+    assert.equal(`${world.wagon.x},${world.wagon.y}`, key, `seed ${seed}: фургон не на площадке`);
+
+    // Пропсы лагеря переехали вместе с ним и не задвоились.
+    const wagons = world.props.filter((p) => p.sprite === "wagon");
+    assert.equal(wagons.length, 1, `seed ${seed}: фургонов на карте ${wagons.length}`);
+
+    // До стоянки есть путь от спавна.
+    assert.equal(hasPath(world, SPAWN, world.wagon), true, `seed ${seed}: до фургона нет пути`);
+  }
+});
+
+test("лагерь: перезагрузка не переставляет стоянку", () => {
+  const a = createWorld();
+  a.seed = 42;
+  spawnCamp(a, 2);
+  const first = `${a.wagon.x},${a.wagon.y}`;
+
+  const b = createWorld();
+  b.seed = 42;
+  spawnCamp(b, 2);
+  const second = `${b.wagon.x},${b.wagon.y}`;
+
+  assert.equal(first, second, "тот же сид и тир должны давать ту же площадку");
+
+  // А другой тир — другую (в пределах перебора).
+  const spots = new Set();
+  for (let tier = 1; tier <= 8; tier++) {
+    const w = createWorld();
+    w.seed = 42;
+    spawnCamp(w, tier);
+    spots.add(`${w.wagon.x},${w.wagon.y}`);
+  }
+  assert.ok(spots.size > 1, "стоянка не меняется с тиром");
 });
 
 test("map: взаимодействия не перекрываются по радиусу", () => {

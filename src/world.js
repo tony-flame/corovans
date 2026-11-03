@@ -609,14 +609,9 @@ export function createWorld() {
   addProp("barrel", 68.5, 84.2, 0.3, 0.55, true, false);
   addProp("barrel", 72.5, 84.2, 0.3, 0.55, true, false);
 
-  // ── Пропсы: стоянка (абсолютные координаты) ──
-  addPropAbs("wagon", WAGON_BASE.x, WAGON_BASE.y, 1.15, 0.95, true, true);
-  addPropAbs("horse", WAGON_BASE.x + 2.8, WAGON_BASE.y - 1.2, 0.55, 0.85, true, true);
-  addPropAbs("campfire", WAGON_BASE.x - 3.1, WAGON_BASE.y - 1.3, 0.32, 0.5, true, false);
-  addPropAbs("crate", WAGON_BASE.x - 1.4, WAGON_BASE.y - 1.7, 0.36, 0.6, true, false);
-  addPropAbs("crate", WAGON_BASE.x + 3.3, WAGON_BASE.y + 2.8, 0.36, 0.6, true, false);
-  addPropAbs("barrel", WAGON_BASE.x - 3.0, WAGON_BASE.y + 1.8, 0.32, 0.55, true, false);
-  addPropAbs("barrel", WAGON_BASE.x + 3.5, WAGON_BASE.y - 2.0, 0.32, 0.55, true, false);
+  // Пропсы стоянки НЕ ставятся здесь: они переезжают вместе с фургоном
+  // и создаются в spawnCamp, иначе на новой площадке фургон стоял бы
+  // один, а костёр, ящики и бочки оставались на старой.
 
   // ── Пропы: деревня ──
   addProp("well", 22.2, 88.4, 0.5, 0.9, true, true);
@@ -787,6 +782,12 @@ export function createWorld() {
     titan: null,
     spawn: { ...SPAWN },
     wagon: { ...WAGON_BASE },
+    // Сид забега: от него зависит, где встанет стоянка. Ставится снаружи,
+    // в main.js; по умолчанию 0 — тогда стоянка на первой площадке.
+    seed: 0,
+    // Текущая площадка стоянки. Заполняется в spawnCamp.
+    campSite: CAMP_SITES[0],
+    campOrigin: { ...CAMP_SITES[0] },
     tier: 1,
     wagonLooted: false,
     campGuards: [],
@@ -842,8 +843,25 @@ function guardPatrol(x, y) {
   ];
 }
 
-function campPoint(offset) {
-  return [CAMP_ORIGIN.x + offset[0], CAMP_ORIGIN.y + offset[1]];
+// Позиции стоянки: несколько разметанных полян внутри зоны лагеря.
+// Пустая зона CAMP — это 132..150 x 58..80. Точки выбраны так, чтобы
+// вокруг фургона хватало места под стражу, костёр и лошадь.
+export const CAMP_SITES = [
+  { x: 142.4, y: 68.1 }, // прежняя, у дороги
+  { x: 138.5, y: 62.0 }, // у северного края
+  { x: 146.0, y: 75.0 }, // южнее, ближе к лесу
+  { x: 136.0, y: 72.5 }, // западнее, у поворота
+  { x: 145.5, y: 63.0 }, // северо-восток зоны
+];
+
+// Какую площадку занять: детерминированно от сида забега и тира.
+export function campSiteFor(seed, tier) {
+  const rng = createRng(hashSeed(`camp-site:${seed}:${tier}`));
+  return CAMP_SITES[Math.floor(rng() * CAMP_SITES.length) % CAMP_SITES.length];
+}
+
+function campPoint(offset, origin = CAMP_ORIGIN) {
+  return [origin.x + offset[0], origin.y + offset[1]];
 }
 
 // tuning приходит из style.js (tuningFor).
@@ -852,14 +870,56 @@ export function spawnCamp(world, tier, tuning = null) {
   const layout = CAMP_LAYOUTS[archetype] || CAMP_LAYOUTS.road_camp;
   const mods = tuning || {};
 
+  // Стоянка переезжает: площадка выбирается по сиду забега и тиру,
+  // чтобы каждый караван стоял в новом месте, но перезагрузка
+  // возвращала тот же лагерь.
+  const site = campSiteFor(world.seed || 0, tier);
+  world.campSite = site;
+  const origin = { x: site.x, y: site.y };
+  world.campOrigin = origin;
+  const point = (offset) => campPoint(offset, origin);
+
   world.actors = world.actors.filter((a) => a.kind !== "guard" && a.kind !== "driver");
   world.tier = tier;
   world.wagonLooted = false;
   world.archetype = archetype;
   world.layout = layout;
 
-  const [wx, wy] = campPoint(layout.wagon);
+  const [wx, wy] = point(layout.wagon);
   world.wagon = { x: wx, y: wy };
+
+  // ── Пропсы стоянки ──
+  // Переезжают вместе с фургоном. Сначала убираем прошлые, иначе
+  // на карте копились бы лагеря от каждого каравана.
+  world.props = world.props.filter((p) => !p.campProp);
+  const campProp = (sprite, dx, dy, r, scale, blocksSight) => {
+    world.props.push({
+      sprite,
+      x: wx + dx,
+      y: wy + dy,
+      r,
+      scale,
+      solid: true,
+      blocksSight,
+      campProp: true,
+    });
+  };
+  world.props.push({
+    sprite: "wagon",
+    x: wx,
+    y: wy,
+    r: 1.15,
+    scale: 0.95,
+    solid: true,
+    blocksSight: true,
+    campProp: true,
+  });
+  campProp("horse", 2.8, -1.2, 0.55, 0.85, true);
+  campProp("campfire", -3.1, -1.3, 0.32, 0.5, false);
+  campProp("crate", -1.4, -1.7, 0.36, 0.6, false);
+  campProp("crate", 3.3, 2.8, 0.36, 0.6, false);
+  campProp("barrel", -3.0, 1.8, 0.32, 0.55, false);
+  campProp("barrel", 3.5, -2.0, 0.32, 0.55, false);
 
   const hpScale = mods.hp || 1;
   const damageScale = mods.damage || 1;
@@ -874,7 +934,7 @@ export function spawnCamp(world, tier, tuning = null) {
   world.dormantGuards = [];
 
   for (let i = 0; i < guardCount; i++) {
-    const [x, y] = campPoint(layout.guardSpots[i]);
+    const [x, y] = point(layout.guardSpots[i]);
     // Баланс: на первом тире двое стражей снимали ~63 HP и убивали новичка.
     // 26 + tier*12 при тире 1 даёт 38 HP вместо 52.
     const hp = Math.round((26 + tier * 12) * hpScale);
@@ -893,7 +953,7 @@ export function spawnCamp(world, tier, tuning = null) {
   }
 
   for (const [ox, oy, opts] of layout.extra || []) {
-    const [x, y] = campPoint([ox, oy]);
+    const [x, y] = point([ox, oy]);
     const hp = Math.round((20 + tier * 9) * hpScale);
     const sleeper = makeActor("guard", x, y, {
       hp,
@@ -911,7 +971,7 @@ export function spawnCamp(world, tier, tuning = null) {
     world.dormantGuards.push(sleeper);
   }
 
-  const [dx, dy] = campPoint(layout.driver);
+  const [dx, dy] = point(layout.driver);
   const driverHp = Math.round((22 + tier * 6) * hpScale);
   const driver = makeActor("driver", dx, dy, {
     hp: driverHp,
@@ -929,7 +989,7 @@ export function spawnCamp(world, tier, tuning = null) {
 
   world.secondWagon = null;
   if (layout.secondWagon) {
-    const [sx, sy] = campPoint(layout.secondWagon);
+    const [sx, sy] = point(layout.secondWagon);
     world.secondWagon = { x: sx, y: sy, looted: false };
   }
 
