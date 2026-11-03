@@ -463,6 +463,18 @@ button:disabled {
 
 .row button { flex: 1 1 auto; }
 
+/* Кнопки торговли не должны уезжать под нижний край: панель
+   Мардо прокручивается, и «Продать всё» с «Торговаться» иначе
+   оказываются за кадром — игрок видит товар и не видит, что с ним делать. */
+#trade .row {
+  position: sticky;
+  bottom: -28px;
+  margin-bottom: -28px;
+  padding: 14px 0 28px;
+  background: var(--panel);
+  box-shadow: 0 -14px 18px -8px rgba(0, 0, 0, 0.9);
+}
+
 /* ── Диалог ── */
 
 .dialog-text {

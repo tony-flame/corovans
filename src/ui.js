@@ -53,6 +53,7 @@ export class UI {
     this.$("close-help").addEventListener("click", () => this.handlers.closeHelp?.());
     this.$("close-trade").addEventListener("click", () => this.handlers.closeTrade?.());
     this.$("sell-btn").addEventListener("click", () => this.handlers.sell?.());
+    this.$("haggle-btn").addEventListener("click", () => this.handlers.haggle?.());
     this.$("fine-btn").addEventListener("click", () => this.handlers.fine?.());
     this.$("trade-upgrades").addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-buy]");
@@ -535,6 +536,19 @@ export class UI {
     const earned = Math.round(totalValue(state.inventory) * sellMultiplier(state.upgrades, state.priceModifier || 1));
     sellBtn.disabled = loot.length === 0;
     sellBtn.textContent = loot.length ? `Продать всё (+${earned} зм.)` : "Продать всё";
+
+    // Торг: кнопка живёт рядом с продажей и гаснет, когда попытки кончились.
+    const haggleBtn = this.$("haggle-btn");
+    if (haggleBtn) {
+      const left = state.haggleLeft ?? 0;
+      // Текст и состояние ставим ВСЕГДА, даже когда кнопка скрыта:
+      // иначе после продажи в ней остаётся «осталось 3» с прошлого раза.
+      haggleBtn.disabled = left <= 0;
+      haggleBtn.textContent = left > 0
+        ? `Торговаться (осталось ${left})`
+        : "Он больше не торгуется";
+      haggleBtn.classList.toggle("hidden", loot.length === 0);
+    }
 
     const fineBtn = this.$("fine-btn");
     const fine = fineFor(state.wanted);

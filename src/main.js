@@ -92,6 +92,15 @@ import {
   chooseOption,
   currentNode,
 } from "./dialog.js";
+import {
+  rollHaggle,
+  haggledPrice,
+  rollText,
+  canHaggle,
+  rollsLeft,
+  MAX_ROLLS,
+  makeHaggleRng,
+} from "./haggle.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -117,6 +126,9 @@ const game = {
   gameOver: false,
   victoryShown: false,
   uiOpen: false,
+  // Сколько раз за визит игрок уже торговался с Мардо.
+  // Не сохраняется: это состояние разговора, а не забега.
+  haggleRolled: 0,
   stealing: false,
   stealProgress: 0,
   noiseTimer: 0,
@@ -170,6 +182,8 @@ function newRun() {
 
   player.reset(world.spawn);
   world.tier = 1;
+  // Новый забег — новый разговор о цене.
+  game.haggleRolled = 0;
   // Сид забега нужен миру: от него зависит, где встанет стоянка.
   world.seed = run.seed;
   run.archetype = "road_camp";
@@ -514,6 +528,7 @@ ui = new UI({
   restart: restartRun,
   continueGame: continueAfterVictory,
   sell: sellLoot,
+  haggle: haggleSell,
   fine: payFine,
   buy: buyUpgrade,
   closeTrade,
@@ -1349,6 +1364,7 @@ function tradeState() {
     contractOffer: run.contractOffer,
     activeContract: run.activeContract,
     priceModifier: priceModifier(),
+    haggleLeft: rollsLeft(game.haggleRolled || 0),
   };
 }
 
@@ -1371,6 +1387,51 @@ function sellLoot() {
   audio.coin();
   ui.message(`Мардо отсчитал ${earned} зм.`);
   if (earned >= 120) noteStyle("sell_high");
+
+  if (world.wagonLooted && !run.lootSoldForTier) {
+    run.lootSoldForTier = true;
+    run.pendingCaravan = true;
+    run.caravanTimer = 12;
+    ui.message("Слух: на северной дороге скоро появится новый караван.");
+  }
+
+  ui.renderTrade(tradeState());
+  checkActProgress();
+  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+}
+
+function buyerPrice(value) {
+  // Базовая цена продажи: та же, что показана на кнопке.
+  return Math.round(value * sellMultiplier(run.upgrades, priceModifier()));
+}
+
+// Торг: бросок кубика против Мардо. Выиграл — наценка, проиграл —
+// скидка. Продажа совершается сразу: иначе игрок мог бы бросить,
+// увидеть проигрыш и закрыть панель без последствий.
+function haggleSell() {
+  if (!ui.tradeOpen || !run) return;
+
+  const value = totalValue(run.inventory);
+  const left = rollsLeft(game.haggleRolled || 0);
+  if (!canHaggle(value, game.haggleRolled || 0)) {
+    if (value <= 0) ui.message("Продавать нечего.");
+    else ui.message("Мардо отворачивается: «Хватит. Цена окончательная.»");
+    return;
+  }
+
+  const result = rollHaggle(makeHaggleRng(run.seed, game.haggleRolled || 0, run.visitIndex || 0));
+  game.haggleRolled = (game.haggleRolled || 0) + 1;
+
+  const earned = haggledPrice(buyerPrice(value), result);
+  run.gold += earned;
+  run.totalSold += earned;
+  run.counters.totalGoldEarned += earned;
+  run.inventory.items = [];
+
+  audio.coin();
+  ui.message(`Мардо: ${rollText(result)}`);
+  ui.message(`Отсчитал ${earned} зм.`);
+  if (result.won) noteStyle("sell_high");
 
   if (world.wagonLooted && !run.lootSoldForTier) {
     run.lootSoldForTier = true;
@@ -2088,6 +2149,8 @@ function updateGame(dt) {
         run.secondWagonLooted = false;
         run.pendingCaravan = false;
         run.lootSoldForTier = false;
+        // Новый караван — новый разговор о цене: Мардо снова готов торговаться.
+        game.haggleRolled = 0;
         ui.message(`На северной дороге замечен новый караван — ${world.layout.label.toLowerCase()}.`);
         saveCheckpoint(CHECKPOINT_REASONS.NEW_CARAVAN);
       }
