@@ -538,15 +538,23 @@ export function createWorld() {
     const ax = x + V;
     const ay = y + V;
     if (VEGETATION.has(sprite) && isRoadTile(getTile(ax, ay))) return;
-    props.push({ sprite, x: ax, y: ay, r, scale, solid, blocksSight });
+    const prop = { sprite, x: ax, y: ay, r, scale, solid, blocksSight };
+    if (scatterMode) prop.scatter = true;
+    props.push(prop);
   };
   // Абсолютные координаты — для собора, ратуши и прочего нового.
   const addPropAbs = (sprite, x, y, r, scale, solid = true, blocksSight = false) => {
     if (VEGETATION.has(sprite) && isRoadTile(getTile(x, y))) return;
-    props.push({ sprite, x, y, r, scale, solid, blocksSight });
+    const prop = { sprite, x, y, r, scale, solid, blocksSight };
+    if (scatterMode) prop.scatter = true;
+    props.push(prop);
   };
 
   // ── Кустарники терна и крестьянские хижины ──
+  // Флаг россыпи: пока он поднят, всё добавленное помечается scatter
+  // и переставляется при старте забега.
+  let scatterMode = false;
+
   const thornSpots = [
     [12, 88], [20, 84], [28, 96], [36, 92], [44, 90],
     [18, 102], [26, 104], [34, 98], [48, 88], [52, 96],
@@ -562,6 +570,77 @@ export function createWorld() {
 
   // Живые изгороди вдоль улиц.
   for (let x = 20; x <= 34; x += 3) addProp("hedge", x, 100.5, 0.4, 0.7, true, false);
+
+  // ── Россыпь внутри зон ──
+  // Деревня, рынок, дворы: дома стоят на местах, а мелочь вокруг них
+  // переставляется от сида забега. Раньше каждая бочка стояла на
+  // координате из кода, и второй забег выглядел ровно как первый.
+  //
+  // Вызывается из scatterVillage(), а не здесь: сид забега известен
+  // только после старта, а мир строится раньше.
+  // (первичная расстановка сидом 0 делается ниже, в scatterVillage)
+
+  // Расстановка мелочи по зонам. Возвращает список зон, чтобы вызов
+  // из main.js мог просто передать сид и не знать про координаты.
+  function placeScatter(seed) {
+    // Точки, рядом с которыми мелочи не место: спавн, площадь с колодцем,
+    // рынок у прилавка, входы в собор и ратушу. Пропс вплотную к этим
+    // местам встаёт игроку в кадр при первом же шаге.
+    const keepClear = [
+      [SPAWN.x, SPAWN.y, 2.2],
+      [MERCHANT_POS.x, MERCHANT_POS.y, 1.8],
+      [62.5, 128.5, 2.5],
+      [MERCHANT_POS.x, MERCHANT_POS.y, 1.8],
+    ];
+
+    const zones = [
+      // Деревенская площадь и дворы: мелкий скарб.
+      { zone: ZONES.SQUARE, sprites: ["barrel", "basket", "crate"], count: 6, r: [0.22, 0.34] },
+      { zone: { x0: 47, y0: 110, x1: 83, y1: 143 }, sprites: ["basket", "barrel", "haystack"], count: 7, r: [0.2, 0.4] },
+      // Рынок: прилавки уже стоят, добавляем только мелочь.
+      { zone: ZONES.MARKET, sprites: ["basket", "crate"], count: 5, r: [0.2, 0.3] },
+      // Двор ратуши и площадь перед собором.
+      { zone: { x0: 144, y0: 52, x1: 180, y1: 88 }, sprites: ["bench", "basket"], count: 4, r: [0.25, 0.35] },
+      { zone: { x0: 144, y0: 92, x1: 186, y1: 142 }, sprites: ["bench", "basket"], count: 4, r: [0.25, 0.35] },
+    ];
+
+    for (const spec of zones) {
+      const rng = createRng(hashSeed(`scatter:${seed}:${spec.zone.x0}:${spec.zone.y0}`));
+      let placed = 0;
+      let guard = 0;
+
+      while (placed < spec.count && guard < spec.count * 40) {
+        guard++;
+        const x = spec.zone.x0 + 1 + Math.floor(rng() * Math.max(1, spec.zone.x1 - spec.zone.x0 - 1));
+        const y = spec.zone.y0 + 1 + Math.floor(rng() * Math.max(1, spec.zone.y1 - spec.zone.y0 - 1));
+
+        // Дорога, вода и стены: пропустить и пробовать снова.
+        // ВАЖНО: isRoadTile считает дорогой и DIRT, а площадь — это
+        // сплошной DIRT. Проверять через него значило отбросить все
+        // точки и получить пустую россыпь. Здесь нужен именно ROAD.
+        const tile = getTile(x, y);
+        if (tile === TILE.ROAD || isWallTile(tile) || isWaterTile(tile)) continue;
+
+        // Вплотную к стене пропс врастает в дом.
+        if (
+          isWallTile(getTile(x + 1, y)) || isWallTile(getTile(x - 1, y)) ||
+          isWallTile(getTile(x, y + 1)) || isWallTile(getTile(x, y - 1))
+        ) continue;
+
+        // Второй пропс в тот же тайл — визуальный мусор.
+        if (props.some((p) => Math.abs(p.x - (x + 0.5)) < 0.9 && Math.abs(p.y - (y + 0.5)) < 0.9)) continue;
+
+        // И не вплотную к местам, где игрок появляется или стоит.
+        if (keepClear.some(([kx, ky, kr]) => Math.hypot(x + 0.5 - kx, y + 0.5 - ky) < kr)) continue;
+
+        const sprite = spec.sprites[Math.floor(rng() * spec.sprites.length) % spec.sprites.length];
+        const r = spec.r[0] + rng() * (spec.r[1] - spec.r[0]);
+        // Мелочь не должна закрывать обзор: корзина и бочка не стена.
+        addPropAbs(sprite, x + 0.5, y + 0.5, r, sprite === "haystack" ? 0.8 : 0.55, true, false);
+        placed++;
+      }
+    }
+  }
 
   // ── Лес: кластеры, а не сетка ──
   // Сетка с равным шагом читалась как ряды. Теперь — пятна густоты
@@ -826,6 +905,23 @@ export function createWorld() {
     chimneys,
   };
 
+  // Функция пересборки россыпи: main.js зовёт её при старте забега,
+  // когда уже известен сид. Пропсы с флагом scatter удаляются и
+  // расставляются заново — иначе каждый забег добавлял бы свои.
+  world.scatterVillage = (seed) => {
+    // Удаляем НА МЕСТЕ, а не через filter: filter создаёт новый массив,
+    // а placeScatter добавляет в старый — россыпь уходила в никуда.
+    for (let i = props.length - 1; i >= 0; i--) {
+      if (props[i].scatter) props.splice(i, 1);
+    }
+    scatterMode = true;
+    try {
+      placeScatter(seed);
+    } finally {
+      scatterMode = false;
+    }
+  };
+
   spawnCamp(world, 1);
   return world;
 }
@@ -919,7 +1015,14 @@ export function spawnCamp(world, tier, tuning = null) {
   // ── Пропсы стоянки ──
   // Переезжают вместе с фургоном. Сначала убираем прошлые, иначе
   // на карте копились бы лагеря от каждого каравана.
-  world.props = world.props.filter((p) => !p.campProp);
+  //
+  // Удаление НА МЕСТЕ: `world.props = world.props.filter(...)` создаёт
+  // новый массив и отрывает world.props от того, который держат
+  // замыкания (addProp, placeScatter) — пропсы после этого писались
+  // в осиротевший массив и пропадали.
+  for (let i = world.props.length - 1; i >= 0; i--) {
+    if (world.props[i].campProp) world.props.splice(i, 1);
+  }
   const campProp = (sprite, dx, dy, r, scale, blocksSight) => {
     world.props.push({
       sprite,

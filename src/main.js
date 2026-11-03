@@ -200,6 +200,8 @@ function newRun() {
   game.haggleRolled = 0;
   // Сид забега нужен миру: от него зависит, где встанет стоянка.
   world.seed = run.seed;
+  // И где ляжет мелочь по площади: дома стоят, скарб вокруг них — нет.
+  world.scatterVillage(run.seed);
   run.archetype = "road_camp";
   spawnCamp(world, 1, tuningFor(run.style));
   respawnWildlifeAndCourtesan();
@@ -225,6 +227,8 @@ function continueRun() {
 
   // Тот же сид — та же площадка: перезагрузка не должна переставлять лагерь.
   world.seed = run.seed;
+  // И та же россыпь: иначе F5 двигал бы бочки по площади.
+  world.scatterVillage(run.seed);
   spawnCamp(world, run.tier, tuningFor(run.style));
   respawnWildlifeAndCourtesan();
   // Погода выводится из сида рана: F5 с чекпоинта даёт тот же дождь,
