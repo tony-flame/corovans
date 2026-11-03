@@ -7,6 +7,7 @@ import { sampleLight } from "./lighting.js";
 import { dropCount, dropPosition, dropLength, skyTint, snowflakePosition, snowflakeCount } from "./weather.js";
 import { createRng, hashSeed } from "./rng.js";
 import { HORSE_CAMERA_LIFT } from "./horse.js";
+import { smokeParticle, flockAt, SMOKE_COUNT } from "./ambience.js";
 
 const SCREEN_W = 1280;
 const SCREEN_H = 720;
@@ -180,6 +181,130 @@ export class Renderer {
     }
   }
 
+  // Следы на земле: короткие тёмные штрихи там, где прошёл игрок.
+  // Рисуются ДО дыма и осадков, потому что лежат на земле.
+  drawTracks(state, player, horizon) {
+    const tracks = state && state.tracks;
+    if (!tracks || tracks.length === 0) return;
+
+    const ctx = this.ctx;
+    const invDet = 1 / (player.planeX * player.dirY - player.dirX * player.planeY);
+
+    ctx.save();
+    for (const track of tracks) {
+      const dx = track.x - player.x;
+      const dy = track.y - player.y;
+      const transformX = invDet * (player.dirY * dx - player.dirX * dy);
+      const transformY = invDet * (-player.planeY * dx + player.planeX * dy);
+      if (transformY <= 0.35 || transformY > 14) continue;
+
+      const screenX = (SCREEN_W / 2) * (1 + transformX / transformY);
+      if (screenX < -40 || screenX > SCREEN_W + 40) continue;
+
+      // След лежит на полу: та же формула, что у низа спрайта.
+      const y = horizon + (SCREEN_H * 0.5 + this.jumpZ) / transformY;
+      if (y < 0 || y >= SCREEN_H) continue;
+
+      const alpha = trackAlpha(track) * Math.min(1, this.light + 0.2);
+      if (alpha <= 0.01) continue;
+
+      // Размер по глубине: вблизи след шире.
+      const w = Math.max(1.5, (SCREEN_H / transformY) * 0.035);
+      ctx.fillStyle = `rgba(38, 30, 22, ${alpha})`;
+
+      // Пара шагов: левая и правая нога, разнесённые поперёк хода.
+      // Одиночные точки читались как мусор на дороге, а не как следы.
+      const spread = w * 0.75;
+      ctx.fillRect(screenX - spread * 0.5 - w * 0.5, y - w * 0.18, w * 0.8, Math.max(1, w * 0.32));
+      ctx.fillRect(screenX + spread * 0.5 - w * 0.3, y - w * 0.12, w * 0.8, Math.max(1, w * 0.32));
+    }
+    ctx.restore();
+  }
+
+  // Дым из труб: частицы проецируются той же перспективой, что и стены.
+  // Рисуем ДО осадков, чтобы дождь шёл поверх дыма.
+  drawSmoke(world, player, horizon, time, state) {
+    const chimneys = world.chimneys;
+    if (!chimneys || chimneys.length === 0) return;
+
+    const ctx = this.ctx;
+    const invDet = 1 / (player.planeX * player.dirY - player.dirX * player.planeY);
+    const seed = (state && state.seed) || 0;
+
+    ctx.save();
+    for (const chimney of chimneys) {
+      const dx = chimney.x - player.x;
+      const dy = chimney.y - player.y;
+      // Дальние трубы не видно — незачем считать их частицы.
+      if (dx * dx + dy * dy > 900) continue;
+
+      const transformX = invDet * (player.dirY * dx - player.dirX * dy);
+      const transformY = invDet * (-player.planeY * dx + player.planeX * dy);
+      if (transformY <= 0.4) continue;
+
+      const screenX = (SCREEN_W / 2) * (1 + transformX / transformY);
+      if (screenX < -SCREEN_W * 0.3 || screenX > SCREEN_W * 1.3) continue;
+
+      // Верх трубы: там же, где потолок стены этой высоты.
+      const stackH = Math.abs(SCREEN_H / transformY) * chimney.height;
+      const groundY = horizon + (SCREEN_H * 0.5 + this.jumpZ) / transformY;
+      const topY = groundY - stackH;
+
+      for (let i = 0; i < SMOKE_COUNT; i++) {
+        const p = smokeParticle(i, SMOKE_COUNT, time, chimney.seed || seed);
+        if (!p.alive || p.alpha <= 0.01) continue;
+
+        // Поднимается над трубой и сносится ветром. Верх ограничен
+        // высотой стены: иначе частицы уезжали выше крыши, а дым
+        // «входил» в дом сверху — труба должна дымить в небо.
+        const risePx = Math.min(p.rise, 1.5) * (SCREEN_H / transformY) * 0.16;
+        const px = screenX + p.drift * (SCREEN_W / transformY) * 0.12;
+        const py = topY - risePx;
+        const r = Math.max(4, (p.scale * SCREEN_H) / (transformY * 9));
+
+        // Дым не светится: при слабом свете он темнеет до почти чёрного.
+        // Раньше формула добавляла +78 и ночью дым превращался в
+        // светящееся пятно, которое было ярче самого дома.
+        const shade = Math.min(1, Math.max(0.08, this.light));
+        const tone = Math.round(30 + 150 * shade);
+        ctx.fillStyle = `rgba(${tone}, ${tone}, ${tone + 4}, ${p.alpha * 0.34})`;
+        ctx.beginPath();
+        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Птицы: клин над горизонтом. Только днём и без сильной непогоды.
+  drawBirds(horizon, time) {
+    // Ночью и в ливень птиц не видно.
+    if (this.light < 0.45) return;
+
+    const ctx = this.ctx;
+    const birds = flockAt(time, this.seed);
+    const baseY = horizon - SCREEN_H * 0.06;
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(28, 26, 24, ${0.55 * Math.min(1, this.light)})`;
+    ctx.lineWidth = 1.2 * UI_SCALE;
+    ctx.beginPath();
+
+    for (const bird of birds) {
+      const x = bird.x * SCREEN_W * 1.2 - SCREEN_W * 0.1;
+      const y = baseY - bird.y * SCREEN_H * 0.5;
+      // Крылья: галочка, угол которой зависит от взмаха.
+      const span = 3.4 * UI_SCALE;
+      const lift = bird.flap * 2.2 * UI_SCALE;
+      ctx.moveTo(x - span, y + lift);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x + span, y + lift);
+    }
+
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Осадки: дождь штрихами, снег точками. Физика разная, поэтому ветки разные.
   drawRain(weather, time, horizon) {
     if (!weather || weather.intensity <= 0.01) return;
@@ -269,6 +394,9 @@ export class Renderer {
 
     this.ctx.putImageData(this.imageData, 0, 0);
     this.drawSprites(world, player, horizon, time, state);
+    this.drawTracks(state, player, horizon);
+    this.drawSmoke(world, player, horizon, time, state);
+    this.drawBirds(horizon, time);
     this.drawRain(state.weather, time, horizon);
     if (state.started) {
       // Верхом вместо меча в кадре голова лошади.

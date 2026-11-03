@@ -201,6 +201,10 @@ export function createWorld() {
       : t === TILE.PLASTER_FRAME ? "plaster_window"
       : "brick_window";
 
+    // Жилой дом — значит, из трубы идёт дым. Сараи (hollowRect) труб
+    // не получают: в них не топят.
+    addChimney(x0, y0, x1, y1);
+
     for (const side of sides) {
       const setWin = (x, y) => addWalls.set(`${x + V},${y + V}`, windowTile);
       if (side === "s") for (let x = x0 + 1; x < x1; x += 2) setWin(x, y1);
@@ -224,6 +228,27 @@ export function createWorld() {
       else if (side === "w") for (let y = y0 + 1; y < y1; y += 2) setWin(x0, y);
       else if (side === "e") for (let y = y0 + 1; y < y1; y += 2) setWin(x1, y);
     }
+  };
+
+  // Трубы: дым идёт из жилых домов, а не из собора и ратуши.
+  // Труба ставится на крышу детерминированно, чтобы у одного дома
+  // она не переезжала при каждом построении мира.
+  const chimneys = [];
+  const addChimney = (x0, y0, x1, y1, abs = false) => {
+    const rng = createRng(hashSeed(`chimney:${x0}:${y0}:${x1}:${y1}`));
+    // У самого края, а не в центре: труба в середине крыши читается
+    // как столб, торчащий из конька.
+    const nearWest = rng() < 0.5;
+    const cx = nearWest ? x0 + 0.6 : x1 - 0.6;
+    const cy = y0 + 0.5 + Math.floor(rng() * Math.max(1, y1 - y0));
+    chimneys.push({
+      x: abs ? cx : cx + V,
+      y: abs ? cy : cy + V,
+      // Чуть выше конька. Высота в тех же единицах, что и стена:
+      // стена дома — 0.5, крыша над карнизом добавляет ещё ~0.22.
+      height: 0.82,
+      seed: Math.floor(rng() * 997),
+    });
   };
 
   // ── Границы мира ──
@@ -796,6 +821,9 @@ export function createWorld() {
     layout: CAMP_LAYOUTS.road_camp,
     dormantGuards: [],
     secondWagon: null,
+    // Трубы жилых домов: источник дыма. Считаются один раз при
+    // построении мира и не меняются.
+    chimneys,
   };
 
   spawnCamp(world, 1);

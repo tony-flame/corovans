@@ -1,7 +1,7 @@
 import { Renderer } from "./raycaster.js";
 import { Input } from "./input.js";
 import { Player } from "./player.js";
-import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor, ZONES } from "./world.js";
+import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor, ZONES, TILE } from "./world.js";
 import { updateActors, maxSuspicion } from "./enemies.js";
 import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
@@ -109,6 +109,12 @@ import {
   canTakeQuest,
   QUEST_TYPES,
 } from "./quests.js";
+import {
+  stepTracks,
+  shouldDropTrack,
+  trackAlpha,
+  TRACK_LIMIT,
+} from "./ambience.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -1484,6 +1490,30 @@ function noteVisitedPlaces() {
   }
 }
 
+function trackFootsteps(dt) {
+  // Следы живут в game, а не в мире и не в ране: это украшение кадра,
+  // и оно не должно переживать перезагрузку.
+  game.tracks = stepTracks(game.tracks || [], dt);
+  game.trackTimer = (game.trackTimer || 0) - dt;
+
+  if (game.trackTimer > 0) return;
+  game.trackTimer = 0.12;
+
+  const moving = input.isDown("KeyW") || input.isDown("KeyS") ||
+    input.isDown("KeyA") || input.isDown("KeyD");
+  if (!moving) return;
+
+  // Только на мягкой земле: на камне и в воде следов не остаётся.
+  const tile = tileAt(world, player.x, player.y);
+  if (tile !== TILE.DIRT && tile !== TILE.ROAD) return;
+  if (!shouldDropTrack(game.lastTrackX, game.lastTrackY, player.x, player.y, 0.7)) return;
+
+  game.lastTrackX = player.x;
+  game.lastTrackY = player.y;
+  game.tracks.push({ x: player.x, y: player.y, age: 0 });
+  if (game.tracks.length > TRACK_LIMIT) game.tracks.shift();
+}
+
 // ── Экономика ───────────────────────────────────────────────────────
 
 function sellLoot() {
@@ -2185,6 +2215,9 @@ function updateGame(dt) {
   game.noiseTimer = Math.max(0, game.noiseTimer - dt);
   game.noiseLevel = Math.max(game.stealing ? 1 : 0, game.noiseTimer > 0 ? 0.9 : 0);
 
+  // Следы на мягкой земле: не механика, а память о пути.
+  trackFootsteps(dt);
+
   // Посещение мест для задания «дойти»: раз в секунду, а не каждый кадр.
   game.questTimer = (game.questTimer || 0) - dt;
   if (game.questTimer <= 0) {
@@ -2358,6 +2391,7 @@ function frame(now) {
     mounted: Boolean(game.mounted),
     // Сид нужен небу: звёзды и луна фиксированы на забег, иначе они мерцают.
     seed: run ? run.seed : 0,
+    tracks: game.tracks || [],
     suspicionSource: (actor) => (actor.asleep ? 0 : actor.suspicion),
     showSuspicion: game.started && !game.gameOver,
   });
