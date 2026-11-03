@@ -617,6 +617,7 @@ function handleKeyDown(code) {
   }
   if (code === "Escape") {
     if (ui.adviceOpen) closeAdvicePanel();
+    else if (ui.titanOpen) leaveTitan();
     else if (ui.courtesanOpen) leaveCourtesan();
     else if (ui.tradeOpen) closeTrade();
     else if (ui.helpOpen) closeHelp();
@@ -988,6 +989,14 @@ function titanDeath() {
 function startTitanDialogue() {
   if (!world.titan || run.titanPacified) return;
 
+  // Титан замирает на время разговора. Раньше он продолжал жевать:
+  // таймер поедания шёл независимо от того, открыта ли панель,
+  // и игрока съедали между нажатием E и первым вопросом.
+  world.titan.state = "talk";
+  world.titan.target = null;
+  world.titan.eatTimer = 0;
+  world.titan.spriteKey = "titan_calm";
+
   game.titanDialogue = {
     questions: titanQuestions(run.seed),
     index: 0,
@@ -1000,6 +1009,30 @@ function startTitanDialogue() {
   ui.setPrompt(null);
   ui.setProgress(null);
   showTitanQuestion();
+}
+
+// Вернуть титана к обычной жизни после разговора.
+function releaseTitan() {
+  const titan = world.titan;
+  if (!titan) return;
+  titan.state = "roam";
+  titan.target = null;
+  titan.eatTimer = 0;
+  titan.roamTimer = 0;
+  titan.spriteKey = "titan_calm";
+}
+
+// Уйти из разговора, ничего не ответив. Раньше панель титана вообще
+// нельзя было закрыть: Escape её не знал, а canControl() блокировал игру.
+// Игрок либо отвечал, либо висел в панели навсегда.
+function leaveTitan() {
+  if (!game.titanDialogue) return;
+  game.titanDialogue = null;
+  game.uiOpen = false;
+  ui.closeTitan();
+  releaseTitan();
+  ui.message("Титан провожает тебя взглядом, но не двигается.");
+  input.requestLock();
 }
 
 function showTitanQuestion() {
@@ -1051,6 +1084,8 @@ function answerTitan(index) {
     return;
   }
 
+  // Ещё не всё спросил: он по-прежнему в разговоре, а не в охоте.
+  if (world.titan) world.titan.state = "talk";
   audio.ui();
   showTitanQuestion();
 }
@@ -1708,7 +1743,8 @@ function objectiveText() {
 function updateWildlife(dt) {
   for (const animal of world.animals || []) {
     if (!animal.alive) continue;
-    const result = stepAnimal(animal, player, dt);
+    // moveActor и world передаются: без них животные ходят сквозь стены.
+    const result = stepAnimal(animal, player, dt, moveActor, world);
     if (result.bite) applyBite(result.bite);
   }
 }
@@ -1728,6 +1764,13 @@ function updateCivilians(dt) {
 function updateTitan(dt) {
   const titan = world.titan;
   if (!titan) return;
+
+  // Во время разговора он заморожен: никакого поедания, пока открыта панель.
+  if (game.titanDialogue) {
+    titan.state = "talk";
+    titan.eatTimer = 0;
+    return;
+  }
 
   const prey = gatherPrey(world, player);
   // moveActor и world передаются в шаг: иначе титан ходит сквозь стены.

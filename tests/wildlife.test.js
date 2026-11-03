@@ -28,7 +28,7 @@ import {
   PRICE_MIN,
   PRICE_MAX,
 } from "../src/npc.js";
-import { createWorld, spawnCamp, hasPath, canStand, SPAWN, MERCHANT_POS, COURTESAN_POS, WAGON_BASE, MAP_W, MAP_H, isSolid, CAMP_LAYOUTS, nearestInteraction, ZONES } from "../src/world.js";
+import { createWorld, spawnCamp, hasPath, canStand, SPAWN, MERCHANT_POS, COURTESAN_POS, WAGON_BASE, MAP_W, MAP_H, isSolid, CAMP_LAYOUTS, nearestInteraction, ZONES, moveActor } from "../src/world.js";
 import { updateActors, maxSuspicion } from "../src/enemies.js";
 
 test("wildlife: диспетчер не превращает животное в стражника", () => {
@@ -94,6 +94,40 @@ test("map: все ключевые точки на карте достижимы
   assert.equal(hasPath(world, SPAWN, MERCHANT_POS), true, "нет пути до Мардо");
   assert.equal(hasPath(world, SPAWN, COURTESAN_POS), true, "нет пути до куртизанки");
   assert.equal(hasPath(world, SPAWN, WAGON_BASE), true, "нет пути до фургона");
+});
+
+test("животное: не проходит сквозь стену", () => {
+  // Регрессия: stepAnimal двигал корову прямым сложением координат,
+  // и она проходила дом насквозь. Дом 49..53 по x, 110..114 по y.
+  const world = createWorld();
+  const cow = createAnimal(SPECIES.COW, 55.5, 112, 42);
+  assert.equal(canStand(world, cow.x, cow.y, cow.r), true, "старт незаконный");
+
+  // Игрок с востока напирает — корова убегает на запад, в дом.
+  const player = { x: 58, y: 112, dead: false };
+
+  for (let i = 0; i < 200; i++) {
+    stepAnimal(cow, player, 0.05, moveActor, world);
+  }
+
+  assert.equal(isSolid(world, cow.x, cow.y), false,
+    `корова залезла в стену: ${cow.x.toFixed(2)},${cow.y.toFixed(2)}`);
+});
+
+test("животное: хищник не проходит сквозь стену в погоне", () => {
+  const world = createWorld();
+  const fox = createAnimal(SPECIES.FOX, 55.5, 112, 7);
+  assert.equal(canStand(world, fox.x, fox.y, fox.r), true, "старт незаконный");
+
+  // Игрок за домом: лиса рвётся к нему сквозь стену.
+  const player = { x: 48, y: 112, dead: false };
+
+  for (let i = 0; i < 200; i++) {
+    stepAnimal(fox, player, 0.05, moveActor, world);
+  }
+
+  assert.equal(isSolid(world, fox.x, fox.y), false,
+    `лиса залезла в стену: ${fox.x.toFixed(2)},${fox.y.toFixed(2)}`);
 });
 
 test("map: вокруг спавна и NPC есть место", () => {

@@ -120,6 +120,16 @@ export function stepTitan(titan, candidates, dt, moveActor = null, world = null)
     return { titan, ate: false, victim: null };
   }
 
+  // Разговор: он замер и слушает. Без этой ветки таймер поедания
+  // продолжал тикать, пока открыта панель вопросов, и игрока съедали
+  // прямо во время диалога — «нет диалога, сообщение что он всех съел».
+  if (titan.state === "talk") {
+    titan.eatTimer = 0;
+    titan.target = null;
+    titan.spriteKey = "titan_calm";
+    return { titan, ate: false, victim: null };
+  }
+
   titan.steps += 1;
 
   // Если цель мертва, исчезла или ушла за радиус интереса — ищем новую.

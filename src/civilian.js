@@ -235,8 +235,16 @@ export function stepCivilian(civilian, dt, threat = null, moveActor = null, worl
 
   civilian.state = "walk";
   civilian.angle = Math.atan2(dy, dx);
-  civilian.x += (dx / dist) * civilian.speed * dt;
-  civilian.y += (dy / dist) * civilian.speed * dt;
+  // Обычный маршрут тоже через moveActor: раньше прямое сложение
+  // позволяло гражданскому пройти сквозь стену дома, а паника уже
+  // ходила через moveActor — два разных правила на одного NPC.
+  const stepX = (dx / dist) * civilian.speed * dt;
+  const stepY = (dy / dist) * civilian.speed * dt;
+  if (moveActor && world) moveActor(world, civilian, stepX, stepY, civilian.r);
+  else {
+    civilian.x += stepX;
+    civilian.y += stepY;
+  }
   return civilian;
 }
 

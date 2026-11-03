@@ -238,6 +238,24 @@ test("гражданские: паника не заводит в стену", (
     "гражданский стоит там, где его тело не помещается");
 });
 
+test("гражданские: обычный маршрут не заводит в стену", () => {
+  // Регрессия: паника ходила через moveActor, а обычный маршрут — прямым
+  // сложением координат. Два разных правила на одного NPC.
+  const world = createWorld();
+  // Маршрут проходит сквозь дом 49..53 x 110..114.
+  const c = createCivilian("peasant_w", 55.5, 112, [
+    [55.5, 112],
+    [48, 112],
+  ], 1);
+  world.civilians = [c];
+  assert.equal(canStand(world, c.x, c.y, c.r, c), true, "старт незаконный");
+
+  for (let i = 0; i < 200; i++) stepCivilian(c, 0.05, null, moveActor, world);
+
+  assert.equal(isSolid(world, c.x, c.y), false,
+    `гражданский прошёл сквозь дом: ${c.x.toFixed(2)},${c.y.toFixed(2)}`);
+});
+
 test("гражданские: фраза стабильна до смены визита", () => {
   const c = createCivilian("drunk", 57.4, 79.6, null, 3);
   const first = civilianLine(c, 42);

@@ -241,6 +241,45 @@ test("титан: вопросы детерминированы", () => {
   assert.equal(a.length, 3);
 });
 
+test("титан: в разговоре не ест, даже вплотную", () => {
+  // Регрессия: таймер поедания тикал во время открытой панели вопросов,
+  // и игрока съедали между нажатием E и первым вопросом.
+  const titan = createTitan(1, 5, 0);
+  titan.state = "talk";
+  const player = { kind: "player", x: 5.2, y: 0, alive: true, isPlayer: true };
+
+  for (let i = 0; i < 200; i++) {
+    const r = stepTitan(titan, [player], 0.05, null, null);
+    assert.equal(r.ate, false, `съел на шаге ${i}`);
+    assert.equal(titan.eatTimer, 0, "таймер поедания должен стоять на нуле");
+  }
+  assert.equal(titan.state, "talk", "он должен оставаться в разговоре");
+});
+
+test("титан: после разговора снова охотится", () => {
+  const titan = createTitan(1, 5, 0);
+  titan.state = "talk";
+  const guard = { kind: "guard", x: 5.5, y: 0, alive: true, r: 0.32 };
+
+  // В разговоре — не ест.
+  let r = stepTitan(titan, [guard], 0.05, null, null);
+  assert.equal(r.ate, false);
+
+  // Отпустили (как это делает releaseTitan) — и он снова охотится.
+  titan.state = "roam";
+  titan.target = null;
+  titan.roamTimer = 0;
+
+  // Ему нужна пауза TITAN_ROAM_TIME перед новой целью — это намеренно.
+  // Проверяем, что после паузы он действительно берётся за добычу.
+  let ate = false;
+  for (let i = 0; i < 200 && !ate; i++) {
+    const res = stepTitan(titan, [guard], 0.05, null, null);
+    ate = res.ate;
+  }
+  assert.equal(ate, true, "после разговора и паузы он должен есть");
+});
+
 test("титан: в каждом вопросе ровно один верный ответ", () => {
   for (const q of TITAN_QUESTIONS) {
     const correct = q.answers.filter((a) => a.correct);

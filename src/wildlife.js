@@ -111,9 +111,21 @@ export function createAnimal(kind, x, y, tier = 1, salt = 0) {
 // если животное укусило игрока в этом кадре.
 // Детерминизм: решение о новой цели берётся от seed + счётчик шагов,
 // без часов, иначе восстановление сейва даст другое поведение.
-export function stepAnimal(animal, player, dt) {
+//
+// moveActor + world необязательны, но без них животные ходят сквозь стены:
+// раньше здесь были прямые `animal.x +=`, и корова могла пройти дом насквозь.
+// Сигнатура обратно совместима — старые вызовы работают как раньше.
+export function stepAnimal(animal, player, dt, moveActor = null, world = null) {
   const def = SPECIES_DEFS[animal.kind];
   if (!def || !animal.alive) return { animal, bite: null };
+
+  const step = (sx, sy) => {
+    if (moveActor && world) moveActor(world, animal, sx, sy, animal.r);
+    else {
+      animal.x += sx;
+      animal.y += sy;
+    }
+  };
 
   const dx = player.x - animal.x;
   const dy = player.y - animal.y;
@@ -129,8 +141,7 @@ export function stepAnimal(animal, player, dt) {
       animal.state = "chase";
       animal.angle = Math.atan2(dy, dx);
       if (dist > 0.9) {
-        animal.x += (dx / dist) * animal.fleeSpeed * dt;
-        animal.y += (dy / dist) * animal.fleeSpeed * dt;
+        step((dx / dist) * animal.fleeSpeed * dt, (dy / dist) * animal.fleeSpeed * dt);
       } else if (animal.attackCd <= 0) {
         animal.attackCd = def.biteCooldown;
         return {
@@ -145,8 +156,10 @@ export function stepAnimal(animal, player, dt) {
     // Травоядные: убегают от игрока, но не бесконечно.
     animal.state = "flee";
     animal.angle = Math.atan2(-dy, -dx);
-    animal.x -= (dx / Math.max(0.001, dist)) * animal.fleeSpeed * dt;
-    animal.y -= (dy / Math.max(0.001, dist)) * animal.fleeSpeed * dt;
+    step(
+      -(dx / Math.max(0.001, dist)) * animal.fleeSpeed * dt,
+      -(dy / Math.max(0.001, dist)) * animal.fleeSpeed * dt
+    );
     if (Math.hypot(animal.x - animal.homeX, animal.y - animal.homeY) > animal.wanderRadius * 2.2) {
       animal.x = animal.homeX;
       animal.y = animal.homeY;
@@ -170,8 +183,7 @@ export function stepAnimal(animal, player, dt) {
   const tdist = Math.hypot(tx, ty);
   if (tdist > 0.2) {
     animal.angle = Math.atan2(ty, tx);
-    animal.x += (tx / tdist) * animal.speed * dt;
-    animal.y += (ty / tdist) * animal.speed * dt;
+    step((tx / tdist) * animal.speed * dt, (ty / tdist) * animal.speed * dt);
   } else {
     animal.state = "idle";
   }

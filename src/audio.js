@@ -1,4 +1,10 @@
 // Синтезированный звук: без внешних файлов.
+
+// Громкость музыки отдельно от эффектов. При master 0.32 и уровне
+// профиля ~0.19 шина даёт итоговый пик около 0.3 — слышно, но шаги
+// и удары остаются на переднем плане.
+const MUSIC_VOLUME = 1.4;
+
 export class AudioSys {
   constructor() {
     this.ctx = null;
@@ -13,10 +19,18 @@ export class AudioSys {
     }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    this.ctx = new AC();
+    this.ctx = this.ctx || new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.32;
     this.master.connect(this.ctx.destination);
+
+    // Отдельная шина для музыки. Раньше она шла в master с уровнем 0.05
+    // при master 0.32 — итог 0.016, тише шагов (0.075). Игрок её просто
+    // не слышал и справедливо считал, что музыки нет.
+    // Своя шина позволяет менять громкость музыки, не трогая эффекты.
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = MUSIC_VOLUME;
+    this.musicBus.connect(this.master);
 
     const length = this.ctx.sampleRate * 0.6;
     this.noiseBuffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
@@ -207,8 +221,9 @@ export class AudioSys {
       root: 110,
       // Интервал квинты: 1.5 — чистая квинта, 1.335 — тритон (злее).
       fifth: 1.5,
-      // Доля от мастера. Музыка тише эффектов всегда.
-      level: 0.055,
+      // Уровень на музыкальной шине (MUSIC_VOLUME = 0.55).
+      // Было 0.05 — вчетверо тише шагов, поэтому музыку не слышали.
+      level: 0.2,
       // Секунд между «колокольчиками».
       bellEvery: 4.5,
       // Пентатоника: полутоны от корня, применяются с множителем 2^k.
@@ -218,26 +233,26 @@ export class AudioSys {
 
     if (phase === "night") {
       base.root = 82;
-      base.level = 0.05;
+      base.level = 0.16;
       base.bellEvery = 6.5;
       base.scale = [0, 3, 5, 7, 10];
       base.fifth = 1.335;
       base.brightness = 700;
     } else if (phase === "dusk") {
       base.root = 98;
-      base.level = 0.052;
+      base.level = 0.18;
       base.bellEvery = 5.2;
       base.fifth = 1.5;
       base.brightness = 900;
     } else if (phase === "dawn") {
       base.root = 123;
-      base.level = 0.05;
+      base.level = 0.19;
       base.bellEvery = 5.5;
       base.fifth = 1.5;
       base.brightness = 1400;
     } else {
       base.root = 131;
-      base.level = 0.048;
+      base.level = 0.2;
       base.bellEvery = 4.2;
       base.fifth = 1.5;
       base.brightness = 1700;
@@ -323,7 +338,8 @@ export class AudioSys {
     droneFifth.connect(filter);
     sub.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    // Музыка идёт в свою шину, а не напрямую в master.
+    gain.connect(this.musicBus || this.master);
 
     drone.start();
     droneFifth.start();
@@ -392,7 +408,6 @@ export class AudioSys {
     osc.stop(now + 2.5);
     over.stop(now + 1.2);
   }
-
   // Выключить музыку (пауза, смерть, финал).
   // Guard по ключу: без него на паузе setTargetAtTime планировался
   // 60 раз в секунду — ровно та же беда, что была у rain().
