@@ -1,7 +1,7 @@
 import { Renderer } from "./raycaster.js";
 import { Input } from "./input.js";
 import { Player } from "./player.js";
-import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor } from "./world.js";
+import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor, ZONES } from "./world.js";
 import { updateActors, maxSuspicion } from "./enemies.js";
 import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
@@ -101,6 +101,14 @@ import {
   MAX_ROLLS,
   makeHaggleRng,
 } from "./haggle.js";
+import {
+  makeQuest,
+  checkQuest,
+  questProgressText,
+  questReward,
+  canTakeQuest,
+  QUEST_TYPES,
+} from "./quests.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -887,6 +895,14 @@ function talkToCivilian(civilianId) {
   bumpVisits(person);
   const line = civilianLine(person, run.seed);
 
+  // Задание на расспросы: считаем РАЗНЫХ жителей, а не визиты.
+  if (run.quest && run.quest.active && run.quest.active.type === QUEST_TYPES.LISTEN) {
+    if (!run.quest.askedPeople.includes(person.id)) {
+      run.quest.askedPeople.push(person.id);
+      refreshQuestState();
+    }
+  }
+
   // Нищий: монету теперь предлагает само дерево, но сама реплика
   // приветствия остаётся — она задаёт тон разговору.
   openCivilianDialog(person, line);
@@ -897,11 +913,17 @@ function talkToCivilian(civilianId) {
 function dialogContext() {
   return {
     seed: run.seed,
+    // Отдельно от seed: seed у каждого NPC свой (для реплик),
+    // а задание строится от сида забега — иначе обещание в диалоге
+    // и выданное задание разъедутся.
+    runSeed: run.seed,
     visits: run.visitIndex || 0,
     gold: run.gold,
     wanted: run.wanted || 0,
     knownIntel: run.intel || {},
     reputation: profile.reputation || 0,
+    // Сторонний квест: что уже сделано по нему.
+    quest: run.quest || null,
   };
 }
 
@@ -914,11 +936,16 @@ function openCivilianDialog(person, greetLine) {
     // И свой сид на каждого: двое крестьян одного вида не должны
     // говорить одну и ту же фразу.
     seed: hashSeed(`${run.seed}:${person.id}`),
+    npcId: person.id,
+    npcKind: person.kind,
+    npcLabel: person.label,
   });
   game.dialog = {
     kind: "civilian",
     personId: person.id,
     label: person.label,
+    // Житель нужен эффекту задания: по нему строится квест.
+    giver: { id: person.id, kind: person.kind, label: person.label },
     greetLine,
     state,
   };
@@ -977,6 +1004,41 @@ function chooseDialogOption(optionId) {
 
 function applyDialogEffect(effect) {
   if (!effect) return;
+
+  // Взяли задание у жителя.
+  if (effect.takeQuest) {
+    const giver = game.dialog && game.dialog.giver;
+    if (giver) {
+      const quest = makeQuest(run.seed, giver, 0);
+      if (quest) {
+        run.quest.active = { ...quest, state: "active" };
+        run.quest.beasts = {};
+        run.quest.visited = {};
+        run.quest.askedPeople = [];
+        ui.message(`${giver.label}: задание взято — ${quest.description.toLowerCase()}.`);
+        saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+      }
+    }
+    return;
+  }
+
+  // Сдали задание.
+  if (effect.claimQuest) {
+    const quest = run.quest && run.quest.active;
+    if (!quest) return;
+    const reward = questReward(quest);
+    run.gold += reward.gold;
+    profile = {
+      ...profile,
+      reputation: (profile.reputation || 0) + reward.rep,
+      stats: { ...profile.stats },
+    };
+    run.quest.active = null;
+    ui.message(`Задание выполнено: +${reward.gold} зм., +${reward.rep} репутации.`);
+    audio.coin();
+    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+    return;
+  }
 
   // Хлеб у торговки: еда в инвентарь, без наценки.
   if (effect.food) {
@@ -1372,6 +1434,56 @@ function priceModifier() {
   return (1 + bonuses().priceBonus) * pricesAt(run.dayTime) * tuningFor(run.style).priceBonus;
 }
 
+function questSnapshot() {
+  return {
+    beastsSince: (run.quest && run.quest.beasts) || {},
+    items: run.inventory.items,
+    visited: (run.quest && run.quest.visited) || {},
+    askedPeople: (run.quest && run.quest.askedPeople) || [],
+  };
+}
+
+// Проверяет активное задание и, если оно выполнилось, помечает.
+// Награду не выдаёт: за ней надо вернуться к жителю, иначе задание
+// закрывалось бы само где-нибудь в лесу без всякого разговора.
+function refreshQuestState() {
+  const quest = run.quest && run.quest.active;
+  if (!quest || quest.state === "complete") return;
+  const result = checkQuest(quest, questSnapshot());
+  if (result.status === "complete") {
+    quest.state = "complete";
+    ui.message(`${quest.giverLabel}: «${questProgressText(quest, questSnapshot())}.» Вернитесь и расскажите.`);
+    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+  }
+}
+
+// Какие места считаются «посещёнными» для задания. Зоны берём из мира:
+// дублировать координаты — значит разъехаться при следующей перестройке.
+const VISIT_PLACES = {
+  cathedral: "CATHEDRAL",
+  rathouse: "RATHOUSE",
+  market: "MARKET",
+};
+
+function noteVisitedPlaces() {
+  const quest = run.quest && run.quest.active;
+  if (!quest || quest.type !== QUEST_TYPES.REACH) return;
+
+  const zoneName = VISIT_PLACES[quest.targetId];
+  const zone = zoneName ? ZONES[zoneName] : null;
+  if (!zone) return;
+  if (run.quest.visited[quest.targetId]) return;
+
+  if (
+    player.x >= zone.x0 && player.x <= zone.x1 &&
+    player.y >= zone.y0 && player.y <= zone.y1
+  ) {
+    run.quest.visited[quest.targetId] = true;
+    ui.message(`${quest.giverLabel}: вы дошли до места.`);
+    refreshQuestState();
+  }
+}
+
 // ── Экономика ───────────────────────────────────────────────────────
 
 function sellLoot() {
@@ -1713,6 +1825,12 @@ function killAnimal(animal, drops) {
   const def = SPECIES_DEFS[animal.kind];
   let taken = 0;
 
+  // Задание на охоту: считаем по видам, а не «всего зверей».
+  if (run.quest && run.quest.active && run.quest.active.type === QUEST_TYPES.HUNT) {
+    run.quest.beasts[animal.kind] = (run.quest.beasts[animal.kind] || 0) + 1;
+    refreshQuestState();
+  }
+
   for (const drop of drops) {
     if (addItem(run.inventory, drop)) taken++;
   }
@@ -1962,7 +2080,24 @@ function objectiveText() {
   } else {
     line = "Возвращайтесь к Мардо за новым заказом";
   }
-  return `${act.label} · ${line}\nЦель: ${act.goal} зм. · продано на ${run.totalSold} зм.`;
+
+  // Стороннее задание показываем отдельной строкой: иначе о нём
+  // напоминает только лента сообщений, которая давно прокрутилась.
+  const quest = run.quest && run.quest.active;
+  let questLine = "";
+  if (quest) {
+    const progress = questProgressText(quest, {
+      beastsSince: (run.quest.beasts || {}),
+      items: run.inventory.items,
+      visited: (run.quest.visited || {}),
+      askedPeople: (run.quest.askedPeople || []),
+    });
+    questLine = `\nПоручение: ${quest.description}${
+      quest.state === "complete" ? " — можно сдать" : ` (${progress})`
+    }`;
+  }
+
+  return `${act.label} · ${line}${questLine}\nЦель: ${act.goal} зм. · продано на ${run.totalSold} зм.`;
 }
 
 // Живность: блуждание, побег, укусы. Животные не сохраняются — пересоздаются с караваном.
@@ -2049,6 +2184,14 @@ function updateGame(dt) {
 
   game.noiseTimer = Math.max(0, game.noiseTimer - dt);
   game.noiseLevel = Math.max(game.stealing ? 1 : 0, game.noiseTimer > 0 ? 0.9 : 0);
+
+  // Посещение мест для задания «дойти»: раз в секунду, а не каждый кадр.
+  game.questTimer = (game.questTimer || 0) - dt;
+  if (game.questTimer <= 0) {
+    game.questTimer = 1;
+    noteVisitedPlaces();
+    refreshQuestState();
+  }
 
   let near = nearestInteraction(world, player);
   const wagonNear = near && near.type === "wagon";

@@ -18,10 +18,85 @@
 // effect — что случится при выборе: применяет main.js, модуль только сообщает.
 
 import { createRng, hashSeed } from "./rng.js";
+import {
+  makeQuest,
+  canTakeQuest,
+  questProgressText,
+  QUEST_GIVERS,
+} from "./quests.js";
 
-// ── Общие ветки ─────────────────────────────────────────────────────
-// Одни и те же темы встречаются у половины деревни, поэтому тексты
-// вынесены сюда: дублировать по девять раз — гарантированно разъехаться.
+// ── Задания в диалоге ───────────────────────────────────────────────
+// Из ветки «А что я могу сделать?» житель выдаёт задание, если у него
+// есть, и игрок ещё не занят. Отдельная тема, а не автовыдача при
+// входе: иначе разговор превращается в раздачу заданий без выбора.
+
+const QUEST_OFFER_LABEL = "А что я могу сделать?";
+const QUEST_DONE_LABEL = "Я всё сделал.";
+
+function questBranch(ctx, rng) {
+  const quest = ctx.quest && ctx.quest.active;
+  if (quest && quest.giverId === ctx.npcId) {
+    const done = quest.state === "complete";
+    return {
+      text: done
+        ? "«Сделал?.. Надо же. Не каждый день дожидаюсь.»"
+        : `«Ты ещё не закончил. ${questProgressText(quest, questSnapshotOf(ctx))}.»`,
+      options: done
+        ? [
+            { id: "claim", label: QUEST_DONE_LABEL, next: "claimed", effect: { claimQuest: true } },
+            { id: "back", label: "Сначала поговорим.", next: "root" },
+            { id: "bye", label: "Уйти", end: true },
+          ]
+        : [
+            { id: "back", label: "Я помню.", next: "root" },
+            { id: "bye", label: "Уйти", end: true },
+          ],
+    };
+  }
+
+  if (!canTakeQuest(quest)) {
+    return {
+      text: "«Ты уже в чём-то занят. Сначала разберись с тем, а потом приходи.»",
+      options: [
+        { id: "back", label: "Ладно.", next: "root" },
+        { id: "bye", label: "Уйти", end: true },
+      ],
+    };
+  }
+
+  const offered = makeQuest(
+    ctx.runSeed ?? ctx.seed,
+    { id: ctx.npcId, kind: ctx.npcKind, label: ctx.npcLabel },
+    0
+  );
+  if (!offered) {
+    return {
+      text: "«Мне-то? Ничего. Справляюсь сам. Ты иди, у тебя дорога.»",
+      options: [
+        { id: "back", label: "Как скажешь.", next: "root" },
+        { id: "bye", label: "Уйти", end: true },
+      ],
+    };
+  }
+
+  return {
+    text: `«${offered.description}.»\n\nЗа это просят немного, но и людей здесь мало.`,
+    options: [
+      { id: "accept", label: "Согласен.", next: "accepted", effect: { takeQuest: true } },
+      { id: "back", label: "Не сейчас.", next: "root" },
+      { id: "bye", label: "Уйти", end: true },
+    ],
+  };
+}
+
+function questSnapshotOf(ctx) {
+  return {
+    beastsSince: (ctx.quest && ctx.quest.beasts) || {},
+    items: [],
+    visited: (ctx.quest && ctx.quest.visited) || {},
+    askedPeople: (ctx.quest && ctx.quest.askedPeople) || [],
+  };
+}
 
 const ROAD_TALK = [
   "«Тракт на восток. Днём ещё терпимо, к ночи лучше не выходить.»",
@@ -50,6 +125,10 @@ const VILLAGE_TALK = [
 function pick(list, rng) {
   return list[Math.floor(rng() * list.length) % list.length];
 }
+
+// ── Общие ветки ─────────────────────────────────────────────────────
+// Одни и те же темы встречаются у половины деревни, поэтому тексты
+// вынесены сюда: дублировать по девять раз — гарантированно разъехаться.
 
 // ── Гражданские ─────────────────────────────────────────────────────
 // У каждого свой корень и свои темы. Общие темы подмешиваются,
@@ -432,6 +511,36 @@ export function buildCivilianDialogue(kind, ctx) {
   // выдавать одну и ту же фразу каждый раз.
   const rng = createRng(hashSeed(`dialog:${kind}:${ctx.seed || 0}:${ctx.visits || 0}`));
   const tree = builder(ctx, rng);
+
+  // Ветка задания добавляется в корень, а не заменяет его:
+  // разговор о дороге никуда не девается, когда есть работа.
+  const branch = questBranch({ ...ctx, npcKind: kind }, rng);
+  tree.quest = branch;
+  tree.accepted = {
+    text: "«Вот и славно. Я знал, что ты согласишься — по лицу видно, что деваться некуда.»",
+    options: [
+      { id: "back", label: "К делу.", next: "root" },
+      { id: "bye", label: "Уйти", end: true },
+    ],
+  };
+  tree.claimed = {
+    text: "«Держи. Не говорю, что много, но больше, чем у меня было.»",
+    effect: { claimQuest: true },
+    options: [
+      { id: "back", label: "Спасибо.", next: "root" },
+      { id: "bye", label: "Уйти", end: true },
+    ],
+  };
+
+  const root = tree.root;
+  if (root && Array.isArray(root.options)) {
+    // Ставим предложение перед «уйти», чтобы «уйти» оставалось последним.
+    const exitIndex = root.options.findIndex((o) => o.end);
+    const option = { id: "quest", label: QUEST_OFFER_LABEL, next: "quest" };
+    if (exitIndex === -1) root.options.push(option);
+    else root.options.splice(exitIndex, 0, option);
+  }
+
   return {
     kind,
     tree,

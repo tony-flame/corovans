@@ -71,6 +71,15 @@ export function createRun(seed, profile, options = {}) {
       acceptedAt: 0,
       totalGoldEarned: 0,
     },
+    // Сторонние задания: своё состояние, чтобы не мешать контрактам Мардо.
+    // beasts — убитые звери по видам за время задания;
+    // visited — посещённые места; askedPeople — кого уже расспросили.
+    quest: {
+      active: null,
+      beasts: {},
+      visited: {},
+      askedPeople: [],
+    },
     // Сколько раз подходили к куртизанке: двигает слухи и не даёт
     // получать один и тот же слух бесконечно.
     visitIndex: 0,
@@ -133,6 +142,14 @@ export function snapshotRun(run, player) {
     caravanTimer: run.caravanTimer,
     lootSoldForTier: run.lootSoldForTier,
     counters: { ...run.counters },
+    quest: run.quest
+      ? {
+          active: run.quest.active ? { ...run.quest.active } : null,
+          beasts: { ...(run.quest.beasts || {}) },
+          visited: { ...(run.quest.visited || {}) },
+          askedPeople: [...(run.quest.askedPeople || [])],
+        }
+      : null,
     player: { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 },
     visitIndex: run.visitIndex || 0,
     courtesanAffinity: { ...(run.courtesanAffinity || {}) },
@@ -176,6 +193,26 @@ export function restoreRun(raw, profile, bonuses = null) {
   run.pendingCaravan = Boolean(raw.pendingCaravan);
   run.caravanTimer = Math.max(0, num(raw.caravanTimer, 0));
   run.lootSoldForTier = Boolean(raw.lootSoldForTier);
+
+  // Сторонние задания: восстанавливаем аккуратно, неизвестное — в ноль.
+  if (raw.quest && typeof raw.quest === "object") {
+    run.quest.active = raw.quest.active && typeof raw.quest.active === "object" ? { ...raw.quest.active } : null;
+    run.quest.beasts = {};
+    if (raw.quest.beasts && typeof raw.quest.beasts === "object") {
+      for (const [kind, value] of Object.entries(raw.quest.beasts)) {
+        if (Number.isFinite(value)) run.quest.beasts[kind] = Math.max(0, Math.floor(value));
+      }
+    }
+    run.quest.visited = {};
+    if (raw.quest.visited && typeof raw.quest.visited === "object") {
+      for (const [place, value] of Object.entries(raw.quest.visited)) {
+        if (value === true) run.quest.visited[place] = true;
+      }
+    }
+    run.quest.askedPeople = Array.isArray(raw.quest.askedPeople)
+      ? raw.quest.askedPeople.filter((id) => typeof id === "number" || typeof id === "string").slice(0, 64)
+      : [];
+  }
 
   if (raw.upgrades && typeof raw.upgrades === "object") {
     for (const key of Object.keys(run.upgrades)) {
