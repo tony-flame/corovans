@@ -80,6 +80,9 @@ export function createRun(seed, profile, options = {}) {
     // Договорился с титаном — он больше не охотится. Хранится в сейве,
     // иначе F5 переигрывал бы диалог.
     titanPacified: false,
+    // Купленные у куртизанок факты: ключ → true. Один раз заплатил —
+    // знание остаётся, иначе перезагрузка продавала бы его снова.
+    intel: {},
     player: { x: 0, y: 0, angle: 0, overheal: 0 },
   };
 
@@ -134,6 +137,7 @@ export function snapshotRun(run, player) {
     visitIndex: run.visitIndex || 0,
     courtesanAffinity: { ...(run.courtesanAffinity || {}) },
     titanPacified: Boolean(run.titanPacified),
+    intel: { ...(run.intel || {}) },
   };
 }
 
@@ -249,6 +253,13 @@ export function restoreRun(raw, profile, bonuses = null) {
   }
 
   run.titanPacified = Boolean(raw.titanPacified);
+
+  // Купленные факты: только известные ключи, только true.
+  if (raw.intel && typeof raw.intel === "object") {
+    for (const [key, value] of Object.entries(raw.intel)) {
+      if (value === true) run.intel[key] = true;
+    }
+  }
 
   return { run, repaired };
 }

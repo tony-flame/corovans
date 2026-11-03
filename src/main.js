@@ -8,7 +8,7 @@ import { AudioSys } from "./audio.js";
 import { addItem, totalValue, rollLoot } from "./inventory.js";
 import { purchase, fineFor, sellMultiplier } from "./economy.js";
 import { damageRoll, inMeleeCone, attackCooldown, stealTime, applyArmor, blockAbsorb, blockFacingDot } from "./combat.js";
-import { createRng, makeRunSeed } from "./rng.js";
+import { createRng, makeRunSeed, hashSeed } from "./rng.js";
 import { recordEvent, tuningFor, dominantArchetype, STYLE_LABELS } from "./style.js";
 import { applyRun, unlock, startingBonuses } from "./profile.js";
 import { readSave, writeSave, hasSave } from "./save.js";
@@ -84,10 +84,14 @@ import {
   stepCivilian,
   civilianLine,
   bumpVisits,
-  isTrader,
-  isBeggar,
-  isRumormonger,
 } from "./civilian.js";
+import {
+  buildCivilianDialogue,
+  buildCourtesanDialogue,
+  dialogueView,
+  chooseOption,
+  currentNode,
+} from "./dialog.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -149,6 +153,7 @@ function canControl() {
     !ui.helpOpen &&
     !ui.lootOpen &&
     !ui.courtesanOpen &&
+    !ui.dialogOpen &&
     !ui.adviceOpen &&
     !ui.titanOpen &&
     !ui.consoleOpen
@@ -519,7 +524,9 @@ ui = new UI({
   finishLoot,
   courtesanPay: payCourtesan,
   courtesanAsk: askCourtesan,
+  courtesanTalk: talkToCourtesan,
   courtesanLeave: leaveCourtesan,
+  dialogOption: chooseDialogOption,
   closeAdvice: closeAdvicePanel,
   consoleCommand: runConsoleCommand,
   titanAnswer: answerTitan,
@@ -624,6 +631,7 @@ function handleKeyDown(code) {
   }
   if (code === "Escape") {
     if (ui.adviceOpen) closeAdvicePanel();
+    else if (ui.dialogOpen) closeDialogPanel();
     else if (ui.titanOpen) leaveTitan();
     else if (ui.courtesanOpen) leaveCourtesan();
     else if (ui.tradeOpen) closeTrade();
@@ -827,6 +835,34 @@ function leaveCourtesan() {
   input.requestLock();
 }
 
+// Большой диалог куртизанки: болтовня бесплатна, факты — за деньги.
+// Отдельная панель, потому что в панели визита кнопок уже четыре.
+function talkToCourtesan() {
+  const courtesan = findCourtesan(game.activeCourtesan);
+  if (!courtesan || !courtesan.variant) return;
+
+  const variant = courtesan.variant;
+  const key = courtesan.spot || "square";
+  const free = isFreeVisit(run.courtesanAffinity, key);
+  const state = buildCourtesanDialogue(variant, {
+    ...dialogContext(),
+    free,
+    knownIntel: run.intel || {},
+  });
+
+  ui.closeCourtesan();
+  game.dialog = {
+    kind: "courtesan",
+    personId: courtesan.id,
+    label: variant.displayName,
+    greetLine: "",
+    state,
+    courtesanKey: key,
+  };
+  showDialog();
+  audio.ui();
+}
+
 // ── Гражданские ──────────────────────────────────────────────────────
 
 function talkToCivilian(civilianId) {
@@ -836,35 +872,157 @@ function talkToCivilian(civilianId) {
   bumpVisits(person);
   const line = civilianLine(person, run.seed);
 
-  // Нищему можно подать: монета за репутацию.
-  if (isBeggar(person)) {
-    if (run.gold >= 1) {
-      run.gold -= 1;
-      profile = {
-        ...profile,
-        reputation: (profile.reputation || 0) + 1,
-        stats: { ...profile.stats },
-      };
-      ui.message(`${person.label}: ${line}`);
-      ui.message("Вы подали монету. +1 репутации.");
-      audio.coin();
-      saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-      return;
+  // Нищий: монету теперь предлагает само дерево, но сама реплика
+  // приветствия остаётся — она задаёт тон разговору.
+  openCivilianDialog(person, line);
+}
+
+// ── Дерево диалога ───────────────────────────────────────────────────
+
+function dialogContext() {
+  return {
+    seed: run.seed,
+    visits: run.visitIndex || 0,
+    gold: run.gold,
+    wanted: run.wanted || 0,
+    knownIntel: run.intel || {},
+    reputation: profile.reputation || 0,
+  };
+}
+
+function openCivilianDialog(person, greetLine) {
+  const state = buildCivilianDialogue(person.kind, {
+    ...dialogContext(),
+    // Визиты считаются по NPC, а не по общему счётчику куртизанки:
+    // иначе деревня хором меняла бы реплики после каждого визита к ней.
+    visits: person.visits || 0,
+    // И свой сид на каждого: двое крестьян одного вида не должны
+    // говорить одну и ту же фразу.
+    seed: hashSeed(`${run.seed}:${person.id}`),
+  });
+  game.dialog = {
+    kind: "civilian",
+    personId: person.id,
+    label: person.label,
+    greetLine,
+    state,
+  };
+  game.uiOpen = true;
+  input.clear();
+  input.exitLock();
+  ui.setPrompt(null);
+  ui.setProgress(null);
+  showDialog();
+  audio.ui();
+}
+
+function showDialog() {
+  const d = game.dialog;
+  if (!d) return;
+  const view = dialogueView(d.state, run.gold);
+  const title = d.kind === "courtesan" ? d.label : `${d.label}`;
+  const text = d.state.history.length === 0 && d.greetLine
+    ? `${d.greetLine}\n\n${view.text}`
+    : view.text;
+  ui.openDialog({ title, text, options: view.options });
+}
+
+function chooseDialogOption(optionId) {
+  const d = game.dialog;
+  if (!d) return;
+
+  const node = currentNode(d.state);
+  const option = node ? (node.options || []).find((o) => o.id === optionId) : null;
+  if (!option) return;
+
+  const result = chooseOption(d.state, optionId, run.gold);
+  if (result.error) return;
+
+  // Сначала списываем деньги: эффект применяется уже к оплаченному.
+  const cost = option.cost || 0;
+  if (cost > 0) {
+    if (run.gold < cost) return;
+    run.gold -= cost;
+    audio.coin();
+  }
+
+  d.state = result.state;
+  applyDialogEffect(result.effect);
+
+  if (result.done) {
+    closeDialogPanel();
+    if (d.kind === "civilian") {
+      ui.message(`${d.label}: разговор окончен.`);
     }
-    ui.message(`${person.label}: ${line}`);
-    ui.message("У вас нет даже монеты.");
     return;
   }
 
-  ui.message(`${person.label}: ${line}`);
+  showDialog();
+}
 
-  if (isTrader(person)) {
-    ui.message("Она торгует едой. Спросите у Мардо — но у неё дешевле.");
-  } else if (isRumormonger(person)) {
-    ui.message("Он готов рассказать больше — за монету.");
+function applyDialogEffect(effect) {
+  if (!effect) return;
+
+  // Хлеб у торговки: еда в инвентарь, без наценки.
+  if (effect.food) {
+    const item = { id: `bread-${run.visitIndex || 0}`, name: "Хлеб", value: 4, weight: 0.6, kind: "food", heal: 12 };
+    if (!addItem(run.inventory, item)) {
+      ui.message("Руки заняты. Хлеб остался у неё.");
+      run.gold += 3;
+    } else {
+      ui.message("Вы купили хлеб.");
+      saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+    }
+    return;
   }
 
-  audio.ui();
+  // Милостыня: репутация растёт, деньги уже списаны.
+  if (effect.rep) {
+    profile = {
+      ...profile,
+      reputation: (profile.reputation || 0) + effect.rep,
+      stats: { ...profile.stats },
+    };
+    ui.message(`Вы подали монету. +${effect.rep} репутации.`);
+    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+    return;
+  }
+
+  // Благословение: разовое лечение.
+  if (effect.bless) {
+    const heal = Math.min(20, player.maxHealth - player.health);
+    player.health = Math.min(player.maxHealth, player.health + 20);
+    ui.message(heal > 0 ? `Благословение: +${heal} здоровья.` : "Благословение принято.");
+    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+    return;
+  }
+
+  // Купленный факт у куртизанки: запоминаем в ране.
+  if (effect.intel) {
+    run.intel = { ...(run.intel || {}), [effect.intel]: true };
+    ui.message(`Запомнили: ${INTEL_SUMMARY[effect.intel] || "сведения записаны."}`);
+    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+  }
+}
+
+const INTEL_SUMMARY = {
+  guards: "смена часовых короткая — охраны много.",
+  sleeper: "один из охраны спит по-настоящему.",
+  titan: "титан не подходит к фургону и ждёт.",
+  mardo: "Мардо не взвешивает товар, а оценивает покупателя.",
+};
+
+function closeDialogPanel() {
+  ui.closeDialog();
+  if (game.dialog && game.dialog.kind === "courtesan") {
+    // Диалог куртизанки закрыт — возвращаться в её панель через E нельзя,
+    // иначе activeCourtesan останется висеть и следующий E откроет чужой разговор.
+    game.activeCourtesan = null;
+    game.courtesanRumorUsed = false;
+  }
+  game.dialog = null;
+  game.uiOpen = false;
+  input.requestLock();
 }
 
 // ── Консоль разработчика ─────────────────────────────────────────────

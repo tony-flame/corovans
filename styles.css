@@ -463,6 +463,27 @@ button:disabled {
 
 .row button { flex: 1 1 auto; }
 
+/* ── Диалог ── */
+
+.dialog-text {
+  white-space: pre-line;
+  line-height: 1.55;
+  margin: 0 0 16px;
+  min-height: 84px;
+}
+
+#dialog-options button {
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+#dialog-options button .cost {
+  color: var(--gold);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
 /* ── Консоль разработчика ── */
 
 .console-panel {

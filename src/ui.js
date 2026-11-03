@@ -35,6 +35,7 @@ export class UI {
     this.overhealFill = this.$("overheal-fill");
     this.overhealText = this.$("overheal-text");
     this.courtesanEl = this.$("courtesan");
+    this.dialogEl = this.$("dialog");
 
     this.startEl = this.$("start");
     this.pauseEl = this.$("pause");
@@ -73,6 +74,11 @@ export class UI {
     this.$("courtesan-pay").addEventListener("click", () => this.handlers.courtesanPay?.());
     this.$("courtesan-ask").addEventListener("click", () => this.handlers.courtesanAsk?.());
     this.$("courtesan-leave").addEventListener("click", () => this.handlers.courtesanLeave?.());
+    this.$("courtesan-talk").addEventListener("click", () => this.handlers.courtesanTalk?.());
+    this.$("dialog-options").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-option]");
+      if (btn) this.handlers.dialogOption?.(btn.dataset.option);
+    });
     this.$("advice-close").addEventListener("click", () => this.handlers.closeAdvice?.());
     this.$("console-form").addEventListener("submit", (e) => {
       e.preventDefault();
@@ -329,6 +335,41 @@ export class UI {
 
   get courtesanOpen() {
     return !this.courtesanEl.classList.contains("hidden");
+  }
+
+  // ── Диалог ────────────────────────────────────────────────────────
+
+  openDialog(view) {
+    this.dialogEl.classList.remove("hidden");
+    this.$("dialog-title").textContent = view.title || "Разговор";
+    this.$("dialog-text").textContent = view.text || "";
+    this.renderDialogOptions(view.options || []);
+  }
+
+  renderDialogOptions(options) {
+    const box = this.$("dialog-options");
+    box.innerHTML = "";
+    for (const option of options) {
+      const btn = document.createElement("button");
+      btn.dataset.option = option.id;
+      btn.disabled = !option.available;
+      btn.textContent = option.label;
+      if (option.reason) {
+        const note = document.createElement("span");
+        note.className = "cost";
+        note.textContent = `— ${option.reason}`;
+        btn.appendChild(note);
+      }
+      box.appendChild(btn);
+    }
+  }
+
+  closeDialog() {
+    this.dialogEl.classList.add("hidden");
+  }
+
+  get dialogOpen() {
+    return !this.dialogEl.classList.contains("hidden");
   }
 
   // ── Консоль разработчика ──────────────────────────────────────────
