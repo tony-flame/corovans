@@ -7,7 +7,7 @@ import { sampleLight } from "./lighting.js";
 import { dropCount, dropPosition, dropLength, skyTint, snowflakePosition, snowflakeCount } from "./weather.js";
 import { createRng, hashSeed } from "./rng.js";
 import { HORSE_CAMERA_LIFT } from "./horse.js";
-import { smokeParticle, flockAt, SMOKE_COUNT } from "./ambience.js";
+import { smokeParticle, flockAt, SMOKE_COUNT, trackAlpha } from "./ambience.js";
 
 const SCREEN_W = 1280;
 const SCREEN_H = 720;

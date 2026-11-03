@@ -24,7 +24,7 @@
     "electron": "electron .",
     "icon": "node scripts/make-icon.mjs",
     "dist": "electron-packager . Corovans --platform=win32 --arch=x64 --out=dist --overwrite --asar --app-version=0.1.0 --icon=electron/icon.ico --ignore=\"^/(tests|scripts|docs|\\.git|dist|node_modules/electron|node_modules/electron-packager)\" --ignore=\"^/(AGENTS|README|CONTRIBUTING|rw)\\.md$\" --ignore=\"^/package-lock\\.json$\" --ignore=\"\\.log$\" --ignore=\"^/\\.vscode\" --ignore=\"^/\\.idea\"",
-    "check": "node scripts/check.mjs",
+    "check": "node scripts/check.mjs && node scripts/check-refs.mjs src",
     "test": "node --test",
     "verify": "npm run check && npm test"
   },

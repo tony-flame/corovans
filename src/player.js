@@ -51,9 +51,21 @@ export class Player {
   }
 
   setAngle(angle) {
-    this.angle = angle;
-    this.dirX = Math.cos(angle);
-    this.dirY = Math.sin(angle);
+    // Угол нормализуется в [0, 2π). Без этого turn() копил прибавления
+    // без предела: после долгой игры угол уходил в тысячи радиан, а
+    // Math.cos/sin на таких числах теряют точность. На развороте 180°
+    // sin(π) ≈ 1.2e-16 — почти ноль, и вся геометрия ведёт себя «на грани».
+    let a = angle;
+    if (!Number.isFinite(a)) a = 0;
+    const TWO_PI = Math.PI * 2;
+    a %= TWO_PI;
+    if (a < 0) a += TWO_PI;
+    // 2π и 0 — один и тот же угол; держим 0, чтобы не копить дрейф.
+    if (a >= TWO_PI) a -= TWO_PI;
+
+    this.angle = a;
+    this.dirX = Math.cos(a);
+    this.dirY = Math.sin(a);
     this.planeX = -this.dirY * 0.66;
     this.planeY = this.dirX * 0.66;
   }
@@ -63,7 +75,10 @@ export class Player {
   }
 
   look(deltaY) {
-    this.pitch = addPitch(this.pitch, deltaY);
+    // clampPitch уже возвращает 0 на NaN, но только на входе. Если pitch
+    // испорчен извне (сейв, чит, отладка), горизонт станет NaN и вся
+    // геометрия рассыплется тихо — чёрный экран без исключения.
+    this.pitch = addPitch(Number.isFinite(this.pitch) ? this.pitch : 0, deltaY);
   }
 
   reset(spawn) {

@@ -31,6 +31,7 @@ import { buildLightmap, AMBIENT } from "./lighting.js";
 import { createWeather, stepWeather, weatherLabel, isWet, setWeather } from "./weather.js";
 import { runCommand, CHEAT_HELP } from "./cheats.js";
 import { buildAdvicePanel } from "./advice.js";
+import { createErrorReporter, createFrameLoop } from "./loop.js";
 import {
   createTitan,
   stepTitan,
@@ -118,7 +119,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-03-dialog-1";
+const BUILD = "2026-11-04-trackfix-1";
 
 const canvas = document.getElementById("game");
 const world = createWorld();
@@ -2371,7 +2372,25 @@ function isInTown(x, y) {
   return x >= 44 && x <= 90 && y >= 104 && y <= 146;
 }
 
-function frame(now) {
+// Исключение внутри кадра раньше убивало игру насмерть: requestAnimationFrame
+// стоял ПОСЛЕДНЕЙ строкой, и до него управление не доходило. Картинка и звук
+// замирали, помогала только перезагрузка. Именно так и случилось с
+// `trackAlpha is not defined`: одна опечатка в импорте — и стоп-кадр.
+//
+// Логика цикла вынесена в src/loop.js: планирование следующего кадра живёт
+// в finally, поэтому один битый кадр остаётся одним битым кадром. Ошибки
+// копятся в window.__frameErrors (видно в ?debug=1) и печатаются один раз
+// на уникальный текст, иначе консоль заливает 60 сообщениями в секунду.
+const reportFrameError = createErrorReporter((error) => {
+  if (typeof window !== "undefined") {
+    window.__frameErrors = window.__frameErrors || [];
+    const text = String((error && error.message) || error);
+    if (!window.__frameErrors.includes(text)) window.__frameErrors.push(text);
+  }
+  console.error("[corovans] кадр упал:", error);
+});
+
+function stepFrame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
 
@@ -2415,10 +2434,16 @@ function frame(now) {
       audio.musicStop(1.5);
     }
   }
-  requestAnimationFrame(frame);
 }
 
 // ── Запуск ──────────────────────────────────────────────────────────
+
+// Кадр собирается здесь, а не выше: createFrameLoop нужен готовый stepFrame.
+const frame = createFrameLoop(
+  stepFrame,
+  (fn) => requestAnimationFrame(fn),
+  reportFrameError
+);
 
 // Целочисленный масштаб: при нецелом множителе pixelated-канвас «мылит».
 // Внутри буфера 1280×720, на экране — кратное увеличение, поля по краям.
