@@ -118,7 +118,7 @@ import {
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-03-world-1";
+const BUILD = "2026-11-03-dialog-1";
 
 const canvas = document.getElementById("game");
 const world = createWorld();
