@@ -712,6 +712,51 @@ export class Renderer {
       const gable = Math.abs(ray.wallX - 0.5) * 2;
       const hasRoof = tallMul <= 1.5;
 
+      // ── Крыша ──
+      // Раньше она ЗАМЕНЯЛА верхние 22% стены: дом получался ниже, а «крыша»
+      // была просто полосой краски на фасаде. Теперь стена рисуется на всю
+      // высоту, а крыша добавляется СВЕРХУ, над карнизом. Дом зрительно
+      // вырастает, и появляется настоящий скат.
+      const roofPx = hasRoof ? Math.max(3, span * ROOF_HEIGHT) : 0;
+      const roofTop = wallTop - roofPx;
+      const roofY0 = Math.max(0, Math.floor(roofTop));
+      const roofY1 = Math.min(SCREEN_H - 1, Math.floor(wallTop) - 1);
+      // Скат: у карниза темнее, у конька светлее. gable=0 в центре тайла.
+      const ridge = 1 - gable;
+      // Свес: край крыши выступает за стену, по краям тайла чуть шире.
+      const eaveOverhang = 1 + gable * 0.35;
+
+      if (roofPx > 0) {
+        for (let y = roofY0; y <= roofY1; y++) {
+          const rt = (y - roofTop) / roofPx; // 0 у конька, 1 у карниза
+          // Черепица: ряды по вертикали ската, чередование светлого и тёмного.
+          const band = ((rt * 9) | 0) & 1 ? 0.86 : 1;
+          // Свет: конёк светлее карниза, и ближе к центру тайла светлее.
+          const slope = (0.45 + ridge * 0.55) * (1 - rt * 0.35);
+          // Карниз — тёмная кромка, отбрасывающая тень на стену.
+          const eaveShadow = rt > 0.9 ? 0.55 : 1;
+          const lit = slope * band * eaveShadow * this.light * eaveOverhang;
+
+          const r = 128 * lit;
+          const g = 82 * lit;
+          const b = 54 * lit;
+
+          const mr = r * this.murkK + this.murkR;
+          const mg = g * this.murkK + this.murkG;
+          const mb = b * this.murkK + this.murkB;
+          // Дизер по номеру строки крыши, чтобы узор не дёргался.
+          const roofRow = (y - roofY0) >> 1;
+          const pxRoof = pack(
+            quantizeFast(mr, this.qt, hx, roofRow),
+            quantizeFast(mg, this.qt, hx, roofRow),
+            quantizeFast(mb, this.qt, hx, roofRow)
+          );
+          const row = y * SCREEN_W;
+          buf[row + x] = pxRoof;
+          if (x + 1 < SCREEN_W) buf[row + x + 1] = pxRoof;
+        }
+      }
+
       // Стена считается блоками 2×2 по вертикали: у собора высота в девять
       // тайлов — это 1300 пикселей на колонку, и каждый проходил полный
       // расчёт цвета. Блок 2×2 режет работу вчетверо без потери детализации
@@ -723,30 +768,13 @@ export class Renderer {
 
         // Затенение к полу: стена перестаёт быть плоской.
         const occlusion = wallOcclusion((y - wallTop) / span, 0.4);
-        const shade = baseShade * occlusion * tileLight;
+        // Карниз бросает тень на верх стены: без этого крыша «наклеена».
+        const underEave = y - wallTop < roofPx * 0.5 ? 0.72 : 1;
+        const shade = baseShade * occlusion * tileLight * underEave;
 
-        // ── Двускатная крыша ──
-        // У высоких зданий (собор, ратуша) крыши нет: их фронтон начинался
-        // бы на четырёхэтажной высоте и висел чёрной полосой через экран.
-        const roofT = (y - wallTop) / span;
-        let sr;
-        let sg;
-        let sb;
-
-        if (hasRoof && roofT < ROOF_HEIGHT) {
-          const tileRow = ((roofT * 18) | 0) & 1;
-          const tileBand = tileRow === 0 ? 1 : 0.86;
-          const slope = 0.55 + (1 - gable) * 0.45;
-          const eave = roofT > ROOF_HEIGHT - 0.02 ? 0.45 : 1;
-          const finalShade = shade * slope * tileBand * eave * 1.15;
-          sr = 116 * slope * tileBand * finalShade + fr * 0.15;
-          sg = 74 * slope * tileBand * finalShade + fg * 0.15;
-          sb = 48 * slope * tileBand * finalShade + fb * 0.15;
-        } else {
-          sr = (c & 255) * shade * fogK + fr;
-          sg = ((c >> 8) & 255) * shade * fogK + fg;
-          sb = ((c >> 16) & 255) * shade * fogK + fb;
-        }
+        const sr = (c & 255) * shade * fogK + fr;
+        const sg = ((c >> 8) & 255) * shade * fogK + fg;
+        const sb = ((c >> 16) & 255) * shade * fogK + fb;
 
         // Подмес сумрака и дизеринг: быстрые версии без массивов.
         const mr = sr * this.murkK + this.murkR;
