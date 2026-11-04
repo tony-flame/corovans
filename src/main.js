@@ -58,7 +58,6 @@ import {
   applyBleed,
   bestFood,
   animalSpawnPlan,
-  isAnimal,
 } from "./wildlife.js";
 import {
   createCourtesan,
@@ -76,25 +75,13 @@ import {
   buildCourtesanDialogue,
 } from "./dialog.js";
 import {
-  rollHaggle,
-  haggledPrice,
-  rollText,
-  canHaggle,
-  rollsLeft,
-  MAX_ROLLS,
-  makeHaggleRng,
-} from "./haggle.js";
-import {
-  questProgressText,
-  canTakeQuest,
-  QUEST_TYPES,
-} from "./quests.js";
-import {
   stepTracks,
   shouldDropTrack,
   trackAlpha,
   TRACK_LIMIT,
 } from "./ambience.js";
+import { rollsLeft } from "./haggle.js";
+import { questProgressText, QUEST_TYPES } from "./quests.js";
 import { createState } from "./core/state.js";
 import * as trade from "./systems/trade.js";
 import * as combat from "./systems/combat.js";
@@ -104,7 +91,7 @@ import * as courtesan from "./systems/courtesan.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-04-refactor-1";
+const BUILD = "2026-11-04-refactor-2";
 
 // Единое изменяемое состояние игры. Модули читают его через геттеры,
 // поэтому вынос логики из main.js не ломает ссылки на run/profile/rng.
@@ -330,16 +317,8 @@ function acceptContract(index) {
   progress.acceptContract(progressCtx(), index);
 }
 
-function contractSnapshot() {
-  return progress.contractSnapshot(progressCtx());
-}
-
 function evaluateContract() {
   progress.evaluateContract(progressCtx());
-}
-
-function finishContract(success, reason = "") {
-  progress.finishContract(progressCtx(), success, reason);
 }
 
 // ── Акты ────────────────────────────────────────────────────────────
@@ -599,18 +578,6 @@ function visitCourtesan(spot) {
   courtesan.visitCourtesan(courtesanCtx(), spot);
 }
 
-function courtesanInfo(variant, spot, free) {
-  return courtesan.courtesanInfo(courtesanCtx(), variant, spot, free);
-}
-
-function courtesanRefusalInfo(variant, reason) {
-  return courtesan.courtesanRefusalInfo(courtesanCtx(), variant, reason);
-}
-
-function findCourtesan(spot) {
-  return courtesan.findCourtesan(courtesanCtx(), spot);
-}
-
 function payCourtesan() {
   courtesan.payCourtesan(courtesanCtx());
 }
@@ -708,10 +675,6 @@ function showDialog() {
 
 function chooseDialogOption(optionId) {
   dialogue.chooseDialogOption(dialogCtx(), optionId);
-}
-
-function applyDialogEffect(effect) {
-  dialogue.applyDialogEffect(dialogCtx(), effect);
 }
 
 function closeDialogPanel() {
@@ -1074,7 +1037,6 @@ function progressCtx() {
   return {
     state,
     game,
-    world,
     player,
     audio,
     styleKey,
@@ -1090,11 +1052,9 @@ function dialogCtx() {
   return {
     state,
     game,
-    world,
     player,
     input,
     audio,
-    refreshQuestState,
     saveCheckpoint,
   };
 }
@@ -1108,7 +1068,6 @@ function combatCtx() {
     player,
     audio,
     noteStyle,
-    saveCheckpoint,
     evaluateContract,
     checkActProgress,
     die,
@@ -1134,10 +1093,6 @@ function tradeCtx() {
     evaluateContract,
     writeSave,
   };
-}
-
-function questSnapshot() {
-  return progress.questSnapshot(progressCtx());
 }
 
 // Проверяет активное задание и, если оно выполнилось, помечает.
@@ -1189,10 +1144,6 @@ function sellLoot() {
   trade.sellLoot(tradeCtx());
 }
 
-function buyerPrice(value) {
-  return trade.buyerPrice(tradeCtx(), value);
-}
-
 // Торг: бросок кубика против Мардо. Выиграл — наценка, проиграл —
 // скидка. Продажа совершается сразу: иначе игрок мог бы бросить,
 // увидеть проигрыш и закрыть панель без последствий.
@@ -1233,17 +1184,6 @@ function performAttack() {
 }
 
 // Убийство животного: добыча в инвентарь, розыск НЕ начисляется.
-function killAnimal(animal, drops) {
-  combat.killAnimal(combatCtx(), animal, drops);
-}
-
-function alertNoise(x, y, radius) {
-  combat.alertNoise(combatCtx(), x, y, radius);
-}
-
-function killActor(actor) {
-  combat.killActor(combatCtx(), actor);
-}
 
 function damagePlayer(amount, source) {
   combat.damagePlayer(combatCtx(), amount, source);

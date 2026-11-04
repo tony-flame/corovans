@@ -56,6 +56,23 @@ export function createState() {
     dialog: null,
     activeCourtesan: null,
     courtesanRumorUsed: false,
+    // Заполняется в startLoot: видел ли кто обыск. Без объявления
+    // поле появлялось только после первого обыска, и чтение до него
+    // давало undefined вместо false.
+    lootWitnessed: false,
+    // Проверка «дошёл до места» тикает раз в секунду, а не каждый кадр.
+    questTimer: 0,
+    // Диалог с титаном: пока он открыт, титан не ест.
+    titanDialogue: null,
+    // Монотонное игровое время и лайтмап: считаются в кадре.
+    clockTotal: 0,
+    lightTimer: 0,
+    lightPhase: null,
+    lightmap: null,
+    // Колбэки, которые main.js вешает на рантайм. Объявлены здесь,
+    // чтобы было видно, какие поля вообще существуют.
+    damagePlayer: null,
+    onGuardAlert: null,
   };
 
   const state = {
