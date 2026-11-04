@@ -116,59 +116,26 @@ import {
   trackAlpha,
   TRACK_LIMIT,
 } from "./ambience.js";
+import { createState } from "./core/state.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
-const BUILD = "2026-11-04-trackfix-1";
+const BUILD = "2026-11-04-refactor-1";
+
+// Единое изменяемое состояние игры. Модули читают его через геттеры,
+// поэтому вынос логики из main.js не ломает ссылки на run/profile/rng.
+const state = createState();
 
 const canvas = document.getElementById("game");
 const world = createWorld();
-// Заодно чиню склейку двух операторов в одну строку — она появилась
-// при прошлых правках и мешает читать.
 const player = new Player(world.spawn);
 const renderer = new Renderer(canvas);
 const audio = new AudioSys();
 
-let saved = readSave();
-let profile = saved.profile;
-let run = null;
-let rng = createRng(1);
+state.rng = createRng(1);
+const game = state.game;
 
-// Рантайм-состояние, которое не сохраняется.
-const game = {
-  started: false,
-  paused: false,
-  gameOver: false,
-  victoryShown: false,
-  uiOpen: false,
-  // Сколько раз за визит игрок уже торговался с Мардо.
-  // Не сохраняется: это состояние разговора, а не забега.
-  haggleRolled: 0,
-  stealing: false,
-  stealProgress: 0,
-  noiseTimer: 0,
-  noiseLevel: 0,
-  weather: null,
-  godMode: false,
-  noclip: false,
-  speedMultiplier: 1,
-  // Верхом: id лошади или null. В сейв НЕ пишется — позиции актёров не сохраняются.
-  mounted: null,
-  horseRef: null,
-  consoleHistory: [],
-  consoleHistoryIndex: -1,
-  time: 0,
-  lastAlertMsg: -99,
-  contractTimeLeft: null,
-  lootBuffer: null,
-  lootSecondWagon: false,
-  suspicion: 0,
-  chasing: false,
-};
-
-let ui;
-
-const bonuses = () => startingBonuses(profile);
+const bonuses = () => startingBonuses(state.profile);
 
 function canControl() {
   return (
@@ -176,14 +143,14 @@ function canControl() {
     !game.paused &&
     !game.gameOver &&
     !game.victoryShown &&
-    !ui.tradeOpen &&
-    !ui.helpOpen &&
-    !ui.lootOpen &&
-    !ui.courtesanOpen &&
-    !ui.dialogOpen &&
-    !ui.adviceOpen &&
-    !ui.titanOpen &&
-    !ui.consoleOpen
+    !state.ui.tradeOpen &&
+    !state.ui.helpOpen &&
+    !state.ui.lootOpen &&
+    !state.ui.courtesanOpen &&
+    !state.ui.dialogOpen &&
+    !state.ui.adviceOpen &&
+    !state.ui.titanOpen &&
+    !state.ui.consoleOpen
   );
 }
 
@@ -191,81 +158,81 @@ function canControl() {
 
 function newRun() {
   const seed = makeRunSeed();
-  run = createRun(seed, profile, { bonuses: bonuses() });
-  rng = createRng(run.seed);
-  rng.restore(run.rngState);
+  state.run = createRun(seed, state.profile, { bonuses: bonuses() });
+  state.rng = createRng(state.run.seed);
+  state.rng.restore(state.run.rngState);
 
   player.reset(world.spawn);
   world.tier = 1;
   // Новый забег — новый разговор о цене.
   game.haggleRolled = 0;
   // Сид забега нужен миру: от него зависит, где встанет стоянка.
-  world.seed = run.seed;
+  world.seed = state.run.seed;
   // И где ляжет мелочь по площади: дома стоят, скарб вокруг них — нет.
-  world.scatterVillage(run.seed);
-  run.archetype = "road_camp";
-  spawnCamp(world, 1, tuningFor(run.style));
+  world.scatterVillage(state.run.seed);
+  state.run.archetype = "road_camp";
+  spawnCamp(world, 1, tuningFor(state.run.style));
   respawnWildlifeAndCourtesan();
-  game.weather = createWeather(run.seed);
+  game.weather = createWeather(state.run.seed);
 
-  run.offerIndex = 0;
-  run.offerAct = 0;
+  state.run.offerIndex = 0;
+  state.run.offerAct = 0;
   refreshContracts();
   syncRunToWorld();
   saveCheckpoint(CHECKPOINT_REASONS.START);
-  ui.message("Мардо: «Караван стоит на северной стоянке. Иди на восток по дороге, потом на север.»");
+  state.ui.message("Мардо: «Караван стоит на северной стоянке. Иди на восток по дороге, потом на север.»");
 }
 
 function continueRun() {
-  const loaded = restoreRun(saved.run, profile, bonuses());
+  const loaded = restoreRun(state.saved.run, state.profile, bonuses());
   if (!loaded) {
     newRun();
     return false;
   }
-  run = loaded.run;
-  rng = createRng(run.seed);
-  rng.restore(run.rngState);
+  state.run = loaded.run;
+  state.rng = createRng(state.run.seed);
+  state.rng.restore(state.run.rngState);
 
   // Тот же сид — та же площадка: перезагрузка не должна переставлять лагерь.
-  world.seed = run.seed;
+  world.seed = state.run.seed;
   // И та же россыпь: иначе F5 двигал бы бочки по площади.
-  world.scatterVillage(run.seed);
-  spawnCamp(world, run.tier, tuningFor(run.style));
+  world.scatterVillage(state.run.seed);
+  spawnCamp(world, state.run.tier, tuningFor(state.run.style));
   respawnWildlifeAndCourtesan();
   // Погода выводится из сида рана: F5 с чекпоинта даёт тот же дождь,
   // иначе перезагрузка стала бы кнопкой «сделать сухо».
-  game.weather = createWeather(run.seed);
-  if (run.wagonLooted) world.wagonLooted = true;
-  if (run.secondWagonLooted) world.secondWagon.looted = true;
+  game.weather = createWeather(state.run.seed);
+  if (state.run.wagonLooted) world.wagonLooted = true;
+  if (state.run.secondWagonLooted) world.secondWagon.looted = true;
 
-  if (playerPositionValid(world, run.player)) {
-    player.x = run.player.x;
-    player.y = run.player.y;
-    player.setAngle(run.player.angle || 0);
+  if (playerPositionValid(world, state.run.player)) {
+    player.x = state.run.player.x;
+    player.y = state.run.player.y;
+    player.setAngle(state.run.player.angle || 0);
     // Запас бодрости восстанавливаем из сейва: иначе F5 его сбрасывает.
-    player.overheal = Math.max(0, Math.min(OVERHEAL_CAP, run.player.overheal || 0));
+    player.overheal = Math.max(0, Math.min(OVERHEAL_CAP, state.run.player.overheal || 0));
   } else {
     player.reset(world.spawn);
   }
 
   syncRunToWorld();
-  ui.message("Вы продолжаете с последнего чекпоинта.");
+  state.ui.message("Вы продолжаете с последнего чекпоинта.");
   return true;
 }
 
 function syncRunToWorld() {
-  world.tier = run.tier;
-  world.wagonLooted = run.wagonLooted;
-  if (world.secondWagon) world.secondWagon.looted = Boolean(run.secondWagonLooted);
+  world.tier = state.run.tier;
+  world.wagonLooted = state.run.wagonLooted;
+  if (world.secondWagon) world.secondWagon.looted = Boolean(state.run.secondWagonLooted);
 }
 
 // Живность и куртизанка пересоздаются вместе с караваном:
 // новый тир и акт дают новую внешность и новые тушки.
 function respawnWildlifeAndCourtesan() {
-  world.animals = spawnAnimals(run.tier, world.archetype);
+  world.animals = spawnAnimals(state.run.tier, world.archetype);
   // Гражданские не пересоздаются с караваном: они часть мира, не лагеря.
   if (!world.civilians || world.civilians.length === 0) {
-    world.civilians = createCivilians(run.seed);
+    world.civilians = createCivilians(state.run.seed);
   }
   // Лошади создаются один раз: конюшенная всегда, личная по разблокировке.
   if (!world.horses || world.horses.length === 0) {
@@ -278,14 +245,14 @@ function respawnWildlifeAndCourtesan() {
 // Титан один на карту. Появляется у леса — далеко от деревни,
 // чтобы первые минуты забега не были смертельными.
 function spawnTitan() {
-  if (!run) return;
-  if (run.titanPacified) {
+  if (!state.run) return;
+  if (state.run.titanPacified) {
     world.titan = null;
     return;
   }
 
   if (!world.titan) {
-    world.titan = createTitan(run.seed, 80.5, 74.5);
+    world.titan = createTitan(state.run.seed, 80.5, 74.5);
   }
 
   // Спрайты собираются при загрузке, не в кадре.
@@ -324,11 +291,11 @@ const ANIMAL_SPOTS = [
 // Каждая куртизанка получает свой вариант: сид включает ключ места.
 // Спрайтов два на стиль: чистый и в крови. Переключаем ключ, а не пересобираем в кадре.
 function updateCourtesanVariant() {
-  const bloodied = (run.counters.kills > 0 && run.wanted > 0) || run.wanted >= 2;
+  const bloodied = (state.run.counters.kills > 0 && state.run.wanted > 0) || state.run.wanted >= 2;
 
   for (const courtesan of world.courtesans || []) {
     const spot = courtesan.spot || "square";
-    const variant = createCourtesan(run.seed, run.tier, run.act, spot);
+    const variant = createCourtesan(state.run.seed, state.run.tier, state.run.act, spot);
     courtesan.displayName = variant.displayName;
     courtesan.variant = variant;
 
@@ -351,83 +318,83 @@ function updateCourtesanVariant() {
 }
 
 function saveCheckpoint(reason) {
-  if (!run) return false;
-  if (!canCheckpoint(run, { stealing: game.stealing })) return false;
+  if (!state.run) return false;
+  if (!canCheckpoint(state.run, { stealing: game.stealing })) return false;
 
-  run.rngState = rng.state();
-  run.player = { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 };
-  return writeSave(profile, snapshotRun(run, player));
+  state.run.rngState = state.rng.state();
+  state.run.player = { x: player.x, y: player.y, angle: player.angle, overheal: player.overheal || 0 };
+  return writeSave(state.profile, snapshotRun(state.run, player));
 }
 
 // ── Стиль и телекоординация ─────────────────────────────────────────
 
 function noteStyle(event) {
-  recordEvent(run.style, event);
+  recordEvent(state.run.style, event);
 }
 
 function styleKey() {
-  return dominantArchetype(run.style);
+  return dominantArchetype(state.run.style);
 }
 
 // ── Контракты ───────────────────────────────────────────────────────
 
 function refreshContracts() {
-  if (!run) return;
-  if (run.activeContract) return;
-  run.contractOffer = generateContracts(run.seed, run.act, run.offerIndex, run.tier, styleKey());
-  run.offerSeed = run.contractOffer.length ? run.contractOffer[0].id : 0;
-  run.offerAct = run.act;
+  if (!state.run) return;
+  if (state.run.activeContract) return;
+  state.run.contractOffer = generateContracts(state.run.seed, state.run.act, state.run.offerIndex, state.run.tier, styleKey());
+  state.run.offerSeed = state.run.contractOffer.length ? state.run.contractOffer[0].id : 0;
+  state.run.offerAct = state.run.act;
 }
 
 function acceptContract(index) {
-  if (!ui.tradeOpen || !run) return;
-  const offer = run.contractOffer[index];
-  if (!offer || run.activeContract) return;
+  if (!state.ui.tradeOpen || !state.run) return;
+  const offer = state.run.contractOffer[index];
+  if (!offer || state.run.activeContract) return;
 
-  run.activeContract = { ...offer, state: "active", acceptedAt: run.dayTime, acceptedClock: game.clockTotal };
-  run.contractOffer = [];
-  run.counters.killsSinceAccept = 0;
-  run.counters.lootsSinceAccept = 0;
-  run.counters.chaseSinceAccept = false;
-  run.counters.driverKilledSinceAccept = false;
-  run.counters.acceptedAt = run.dayTime;
+  state.run.activeContract = { ...offer, state: "active", acceptedAt: state.run.dayTime, acceptedClock: game.clockTotal };
+  state.run.contractOffer = [];
+  state.run.counters.killsSinceAccept = 0;
+  state.run.counters.lootsSinceAccept = 0;
+  state.run.counters.chaseSinceAccept = false;
+  state.run.counters.driverKilledSinceAccept = false;
+  state.run.counters.acceptedAt = state.run.dayTime;
   // Монотонный отпечаток времени: dayTime замыкается, clockTotal нет.
-  run.counters.acceptedClock = game.clockTotal;
+  state.run.counters.acceptedClock = game.clockTotal;
 
   audio.ui();
-  ui.message(`Взят заказ: ${contractName(offer.type)}. ${offer.description}`);
-  ui.renderTrade(tradeState());
+  state.ui.message(`Взят заказ: ${contractName(offer.type)}. ${offer.description}`);
+  state.ui.renderTrade(tradeState());
   saveCheckpoint(CHECKPOINT_REASONS.CONTRACT_ACCEPTED);
 }
 
 function contractSnapshot() {
   return {
-    kills: run.counters.kills,
-    killsSinceAccept: run.counters.killsSinceAccept,
-    lootsSinceAccept: run.counters.lootsSinceAccept,
-    chaseSinceAccept: run.counters.chaseSinceAccept,
-    driverKilledSinceAccept: run.counters.driverKilledSinceAccept,
-    items: run.inventory.items,
-    dayTime: run.dayTime,
-    acceptedAt: run.counters.acceptedAt,
+    kills: state.run.counters.kills,
+    killsSinceAccept: state.run.counters.killsSinceAccept,
+    lootsSinceAccept: state.run.counters.lootsSinceAccept,
+    chaseSinceAccept: state.run.counters.chaseSinceAccept,
+    driverKilledSinceAccept: state.run.counters.driverKilledSinceAccept,
+    items: state.run.inventory.items,
+    dayTime: state.run.dayTime,
+    acceptedAt: state.run.counters.acceptedAt,
     // Монотонное время: не замыкается через 240 с, поэтому дедлайн
     // нельзя обойти сменой суток.
     clockTotal: game.clockTotal,
-    acceptedClock: run.counters.acceptedClock,
+    acceptedClock: state.run.counters.acceptedClock,
   };
 }
 
 function evaluateContract() {
-  if (!run || !run.activeContract) return;
-  const contract = run.activeContract;
+  if (!state.run || !state.run.activeContract) return;
+  const contract = state.run.activeContract;
   const snap = contractSnapshot();
   const result = checkContract(contract, snap);
 
   if (contract.deadline && result.status === "active") {
     // Остаток считается по тому же монотонному счётчику, иначе HUD врал.
-    const elapsed = Number.isFinite(run.counters.acceptedClock)
-      ? Math.max(0, game.clockTotal - run.counters.acceptedClock)
-      : Math.max(0, run.dayTime - contract.acceptedAt);
+    const elapsed = Number.isFinite(state.run.counters.acceptedClock)
+      ? Math.max(0, game.clockTotal - state.run.counters.acceptedClock)
+      : Math.max(0, state.run.dayTime - contract.acceptedAt);
     game.contractTimeLeft = Math.max(0, contract.deadline - elapsed);
   } else {
     game.contractTimeLeft = null;
@@ -441,59 +408,59 @@ function evaluateContract() {
 }
 
 function finishContract(success, reason = "") {
-  const contract = run.activeContract;
+  const contract = state.run.activeContract;
   if (!contract) return;
 
   if (success) {
-    const reward = rewardOf(contract, run.contractStreak);
-    run.gold += reward.gold;
-    run.contractStreak += 1;
-    run.counters.contractsDone += 1;
-    profile = {
+    const reward = rewardOf(contract, state.run.contractStreak);
+    state.run.gold += reward.gold;
+    state.run.contractStreak += 1;
+    state.run.counters.contractsDone += 1;
+    state.profile = {
       ...profile,
-      reputation: (profile.reputation || 0) + reward.rep,
-      completedContracts: profile.completedContracts.includes(contract.id)
-        ? profile.completedContracts
+      reputation: (state.profile.reputation || 0) + reward.rep,
+      completedContracts: state.profile.completedContracts.includes(contract.id)
+        ? state.profile.completedContracts
         : [...profile.completedContracts, contract.id],
-      stats: { ...profile.stats, contractsDone: (profile.stats.contractsDone || 0) + 1 },
+      stats: { ...profile.stats, contractsDone: (state.profile.stats.contractsDone || 0) + 1 },
     };
     noteStyle("contract_done");
     if (contract.type === "clean" || contract.type === "unseen") noteStyle("clean_contract");
-    ui.message(`Заказ выполнен: +${reward.gold} зм., +${reward.rep} репутации.`);
+    state.ui.message(`Заказ выполнен: +${reward.gold} зм., +${reward.rep} репутации.`);
     audio.coin();
   } else {
-    run.contractStreak = 0;
-    run.counters.contractsFailed += 1;
-    profile = {
+    state.run.contractStreak = 0;
+    state.run.counters.contractsFailed += 1;
+    state.profile = {
       ...profile,
-      stats: { ...profile.stats, contractsFailed: (profile.stats.contractsFailed || 0) + 1 },
+      stats: { ...profile.stats, contractsFailed: (state.profile.stats.contractsFailed || 0) + 1 },
     };
     noteStyle("contract_failed");
-    ui.message(`Заказ провален${reason ? `: ${reason}` : ""}.`);
+    state.ui.message(`Заказ провален${reason ? `: ${reason}` : ""}.`);
   }
 
-  run.activeContract = null;
+  state.run.activeContract = null;
   game.contractTimeLeft = null;
-  run.offerIndex += 1;
+  state.run.offerIndex += 1;
   refreshContracts();
   checkActProgress();
   saveCheckpoint(success ? CHECKPOINT_REASONS.CONTRACT_DONE : CHECKPOINT_REASONS.SOLD);
-  if (ui.tradeOpen) ui.renderTrade(tradeState());
+  if (state.ui.tradeOpen) state.ui.renderTrade(tradeState());
 }
 
 // ── Акты ────────────────────────────────────────────────────────────
 
 function checkActProgress() {
-  if (!run || game.victoryShown) return;
-  const goal = goalOf(run);
-  if (run.gold < goal || run.totalSold <= 0) return;
+  if (!state.run || game.victoryShown) return;
+  const goal = goalOf(state.run);
+  if (state.run.gold < goal || state.run.totalSold <= 0) return;
 
-  if (run.act < ACTS.length - 1) {
-    run.act += 1;
-    run.offerIndex += 1;
+  if (state.run.act < ACTS.length - 1) {
+    state.run.act += 1;
+    state.run.offerIndex += 1;
     refreshContracts();
-    const act = actOf(run);
-    ui.message(`${act.label}: «${act.title}». Новая цель — ${act.goal} зм.`);
+    const act = actOf(state.run);
+    state.ui.message(`${act.label}: «${act.title}». Новая цель — ${act.goal} зм.`);
     audio.victory();
     saveCheckpoint(CHECKPOINT_REASONS.ACT_UP);
     return;
@@ -502,18 +469,18 @@ function checkActProgress() {
   game.victoryShown = true;
   game.paused = true;
   input.exitLock();
-  ui.closeTrade();
-  ui.closeLoot();
-  ui.hideHelp();
+  state.ui.closeTrade();
+  state.ui.closeLoot();
+  state.ui.hideHelp();
   game.uiOpen = false;
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
   audio.victory();
-  profile = applyRun(profile, runSummary(run, { style: styleKey() }));
-  writeSave(profile, null);
-  ui.showEnd(
+  state.profile = applyRun(state.profile, runSummary(state.run, { style: styleKey() }));
+  writeSave(state.profile, null);
+  state.ui.showEnd(
     "Демо пройдено",
-    `Вы собрали ${run.gold} золотых на чужих караванах. Репутация: ${profile.reputation}. Дорога запомнила вас — ${STYLE_LABELS[styleKey()]}.`,
+    `Вы собрали ${state.run.gold} золотых на чужих караванах. Репутация: ${state.profile.reputation}. Дорога запомнила вас — ${STYLE_LABELS[styleKey()]}.`,
     true
   );
 }
@@ -540,7 +507,7 @@ const input = new Input(canvas, {
   },
 });
 
-ui = new UI({
+state.ui = new UI({
   start: startGame,
   load: loadGame,
   resume: resumeGame,
@@ -565,6 +532,7 @@ ui = new UI({
   consoleCommand: runConsoleCommand,
   titanAnswer: answerTitan,
 });
+state.ui = state.ui;
 
 canvas.addEventListener("click", () => {
   if (canControl() && !input.locked) input.requestLock();
@@ -576,7 +544,7 @@ function startGame() {
   game.started = true;
   game.paused = false;
   document.body.classList.add("playing");
-  ui.hideStart();
+  state.ui.hideStart();
   newRun();
   input.requestLock();
 }
@@ -584,38 +552,38 @@ function startGame() {
 function loadGame() {
   audio.init();
   audio.ui();
-  saved = readSave();
-  profile = saved.profile;
+  state.saved = readSave();
+  state.profile = state.saved.profile;
   game.started = true;
   game.paused = false;
   game.gameOver = false;
   game.victoryShown = false;
   document.body.classList.add("playing");
-  ui.hideStart();
-  ui.hideEnd();
+  state.ui.hideStart();
+  state.ui.hideEnd();
   if (!continueRun()) {
-    ui.message("Сохранение не читается — начат новый забег.");
+    state.ui.message("Сохранение не читается — начат новый забег.");
   }
   input.requestLock();
 }
 
 function restartRun() {
-  if (run) {
-    profile = applyRun(profile, runSummary(run, { style: styleKey() }));
-    writeSave(profile, null);
+  if (state.run) {
+    state.profile = applyRun(state.profile, runSummary(state.run, { style: styleKey() }));
+    writeSave(state.profile, null);
   }
-  saved = { profile, run: null };
-  run = null;
+  state.saved = { profile: state.profile, run: null };
+  state.run = null;
   game.gameOver = false;
   game.victoryShown = false;
   game.paused = false;
-  ui.hideEnd();
+  state.ui.hideEnd();
   newRun();
   input.requestLock();
 }
 
 function continueAfterVictory() {
-  ui.hideEnd();
+  state.ui.hideEnd();
   game.victoryShown = false;
   game.paused = false;
   input.requestLock();
@@ -624,53 +592,53 @@ function continueAfterVictory() {
 function pauseGame() {
   game.paused = true;
   input.clear();
-  ui.setPrompt(null);
-  ui.setProgress(null);
-  ui.showPause();
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
+  state.ui.showPause();
 }
 
 function resumeGame() {
   if (game.gameOver) return;
   game.paused = false;
-  ui.hidePause();
+  state.ui.hidePause();
   input.requestLock();
 }
 
 function handleKeyDown(code) {
   // Консоль перехватывает всё, пока открыта.
   if (code === "Backquote") {
-    if (ui.consoleOpen) closeConsole();
+    if (state.ui.consoleOpen) closeConsole();
     else openConsole();
     return;
   }
-  if (code === "ArrowUp" && ui.consoleOpen) {
+  if (code === "ArrowUp" && state.ui.consoleOpen) {
     consoleHistory(-1);
     return;
   }
-  if (code === "ArrowDown" && ui.consoleOpen) {
+  if (code === "ArrowDown" && state.ui.consoleOpen) {
     consoleHistory(1);
     return;
   }
-  if (ui.consoleOpen) return;
+  if (state.ui.consoleOpen) return;
 
-  if (code === "KeyI" && game.started && !game.gameOver && !ui.tradeOpen) {
-    if (ui.helpOpen) closeHelp();
+  if (code === "KeyI" && game.started && !game.gameOver && !state.ui.tradeOpen) {
+    if (state.ui.helpOpen) closeHelp();
     else openHelp();
     return;
   }
   if (code === "Tab") {
-    if (ui.adviceOpen) closeAdvicePanel();
+    if (state.ui.adviceOpen) closeAdvicePanel();
     else openAdvicePanel();
     return;
   }
   if (code === "Escape") {
-    if (ui.adviceOpen) closeAdvicePanel();
-    else if (ui.dialogOpen) closeDialogPanel();
-    else if (ui.titanOpen) leaveTitan();
-    else if (ui.courtesanOpen) leaveCourtesan();
-    else if (ui.tradeOpen) closeTrade();
-    else if (ui.helpOpen) closeHelp();
-    else if (ui.lootOpen) finishLoot();
+    if (state.ui.adviceOpen) closeAdvicePanel();
+    else if (state.ui.dialogOpen) closeDialogPanel();
+    else if (state.ui.titanOpen) leaveTitan();
+    else if (state.ui.courtesanOpen) leaveCourtesan();
+    else if (state.ui.tradeOpen) closeTrade();
+    else if (state.ui.helpOpen) closeHelp();
+    else if (state.ui.lootOpen) finishLoot();
     return;
   }
   if (code === "KeyR" && game.gameOver) {
@@ -711,24 +679,24 @@ function handleKeyDown(code) {
 
 // Съесть самый сытный предмет. Мгновенно, без панелей.
 function eatBestFood() {
-  const food = bestFood(run.inventory.items);
+  const food = bestFood(state.run.inventory.items);
   if (!food) {
-    ui.message("Съестного нет.");
+    state.ui.message("Съестного нет.");
     return;
   }
   if (player.health >= player.maxHealth) {
-    ui.message("Вы и так сыты.");
+    state.ui.message("Вы и так сыты.");
     return;
   }
 
-  const index = run.inventory.items.findIndex((item) => item.id === food.id);
+  const index = state.run.inventory.items.findIndex((item) => item.id === food.id);
   if (index === -1) return;
-  run.inventory.items.splice(index, 1);
+  state.run.inventory.items.splice(index, 1);
 
   const heal = Math.min(food.heal || 0, player.maxHealth - player.health);
   player.health = Math.min(player.maxHealth, player.health + heal);
   audio.eat?.();
-  ui.message(`Вы съели ${food.name.toLowerCase()} (+${heal} здоровья).`);
+  state.ui.message(`Вы съели ${food.name.toLowerCase()} (+${heal} здоровья).`);
 }
 
 // Куртизанка: открываем панель диалога, а не списываем деньги молча.
@@ -739,8 +707,8 @@ function visitCourtesan(spot) {
 
   const key = courtesan.spot || "square";
   const variant = courtesan.variant;
-  const free = isFreeVisit(run.courtesanAffinity, key);
-  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal, free);
+  const free = isFreeVisit(state.run.courtesanAffinity, key);
+  const can = courtesanCanServe(variant, state.run.gold, player.health, player.maxHealth, player.overheal, free);
 
   game.activeCourtesan = key;
   // При отказе всё равно показываем панель: так игрок видит, почему нельзя.
@@ -749,24 +717,24 @@ function visitCourtesan(spot) {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.setPrompt(null);
-  ui.setProgress(null);
-  ui.openCourtesan({
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
+  state.ui.openCourtesan({
     displayName: variant.displayName,
     temperLabel: variant.temperLabel,
     description: describeCourtesan(variant).replace(`${variant.displayName} (${variant.temperLabel}): `, ""),
     line: can.ok
-      ? greetCourtesan(variant, rng, {
-          wanted: run.wanted,
-          bled: run.bleed?.remaining || 0,
+      ? greetCourtesan(variant, state.rng, {
+          wanted: state.run.wanted,
+          bled: state.run.bleed?.remaining || 0,
           free,
         })
-      : refusalLine(variant, can.reason, rng),
+      : refusalLine(variant, can.reason, state.rng),
     info: can.ok ? courtesanInfo(variant, key, free) : courtesanRefusalInfo(variant, can.reason),
     price: variant.price,
     canPay: can.ok,
     free,
-    affinity: affinityOf(run.courtesanAffinity, key),
+    affinity: affinityOf(state.run.courtesanAffinity, key),
     rumorUsed: false,
   });
   audio.ui();
@@ -776,7 +744,7 @@ function courtesanInfo(variant, spot, free) {
   const health = `Здоровье ${Math.ceil(player.health)}/${player.maxHealth}` +
     (player.overheal > 0.05 ? ` · запас +${Math.ceil(player.overheal)}` : "");
   if (free) return `Бесплатно: она вас помнит. ${health}`;
-  const visits = affinityOf(run.courtesanAffinity, spot);
+  const visits = affinityOf(state.run.courtesanAffinity, spot);
   const left = Math.max(0, 2 - visits);
   return `Цена: ${variant.price} зм. ${health}` +
     (left > 0 && left < 2 ? ` · ещё ${left} платных визит(а) до «с тебя не беру»` : "");
@@ -784,7 +752,7 @@ function courtesanInfo(variant, spot, free) {
 
 function courtesanRefusalInfo(variant, reason) {
   if (reason === "full_health") return "Она смотрит с сомнением: лечить нечего.";
-  return `Не хватает ${Math.max(0, variant.price - run.gold)} зм.`;
+  return `Не хватает ${Math.max(0, variant.price - state.run.gold)} зм.`;
 }
 
 function findCourtesan(spot) {
@@ -801,46 +769,46 @@ function payCourtesan() {
   if (!courtesan || !courtesan.variant) return;
 
   const variant = courtesan.variant;
-  const free = isFreeVisit(run.courtesanAffinity, key);
-  const can = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal, free);
+  const free = isFreeVisit(state.run.courtesanAffinity, key);
+  const can = courtesanCanServe(variant, state.run.gold, player.health, player.maxHealth, player.overheal, free);
   if (!can.ok) {
-    ui.setCourtesanLine(refusalLine(variant, can.reason, rng));
+    state.ui.setCourtesanLine(refusalLine(variant, can.reason, state.rng));
     return;
   }
 
-  const result = applyHeal(variant, run.gold, player.health, player.maxHealth, player.overheal, free);
-  run.gold = result.gold;
+  const result = applyHeal(variant, state.run.gold, player.health, player.maxHealth, player.overheal, free);
+  state.run.gold = result.gold;
   player.health = result.health;
   player.overheal = result.overheal;
 
   // Платный визит повышает привязанность. Бесплатный — нет,
   // иначе первый же бесплатный визит сделал бы её вечной.
   if (!free) {
-    run.courtesanAffinity = bumpAffinity(run.courtesanAffinity, key);
+    state.run.courtesanAffinity = bumpAffinity(state.run.courtesanAffinity, key);
   }
 
   audio.coin();
-  ui.setCourtesanLine(afterCourtesanLine(variant, rng));
+  state.ui.setCourtesanLine(afterCourtesanLine(variant, state.rng));
 
   const parts = [];
   if (result.healed > 0) parts.push(`+${result.healed} здоровья`);
   if (result.topped > 0) parts.push(`+${Math.round(result.topped)} запаса`);
   const priceText = free ? "бесплатно" : `−${variant.price} зм.`;
-  if (parts.length) ui.message(`Отдых: ${parts.join(", ")} (${priceText}).`);
+  if (parts.length) state.ui.message(`Отдых: ${parts.join(", ")} (${priceText}).`);
 
   // Обновляем доступность: повторный визит может быть уже не нужен.
-  const freeNow = isFreeVisit(run.courtesanAffinity, key);
-  const again = courtesanCanServe(variant, run.gold, player.health, player.maxHealth, player.overheal, freeNow);
-  ui.openCourtesan({
+  const freeNow = isFreeVisit(state.run.courtesanAffinity, key);
+  const again = courtesanCanServe(variant, state.run.gold, player.health, player.maxHealth, player.overheal, freeNow);
+  state.ui.openCourtesan({
     displayName: variant.displayName,
     temperLabel: variant.temperLabel,
     description: describeCourtesan(variant).replace(`${variant.displayName} (${variant.temperLabel}): `, ""),
-    line: ui.$("courtesan-line").textContent,
+    line: state.ui.$("courtesan-line").textContent,
     info: again.ok ? courtesanInfo(variant, key, freeNow) : "Больше она вам сегодня не поможет.",
     price: variant.price,
     canPay: again.ok,
     free: freeNow,
-    affinity: affinityOf(run.courtesanAffinity, key),
+    affinity: affinityOf(state.run.courtesanAffinity, key),
     rumorUsed: game.courtesanRumorUsed,
   });
 
@@ -853,16 +821,16 @@ function askCourtesan() {
   if (game.courtesanRumorUsed) return;
 
   game.courtesanRumorUsed = true;
-  const rumor = courtesanRumor(run.seed, run.visitIndex);
-  run.visitIndex = (run.visitIndex || 0) + 1;
+  const rumor = courtesanRumor(state.run.seed, state.run.visitIndex);
+  state.run.visitIndex = (state.run.visitIndex || 0) + 1;
 
-  ui.showCourtesanRumor(`«${rumor}»`);
+  state.ui.showCourtesanRumor(`«${rumor}»`);
   audio.ui();
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
 }
 
 function leaveCourtesan() {
-  ui.closeCourtesan();
+  state.ui.closeCourtesan();
   game.uiOpen = false;
   game.courtesanRumorUsed = false;
   game.activeCourtesan = null;
@@ -877,14 +845,14 @@ function talkToCourtesan() {
 
   const variant = courtesan.variant;
   const key = courtesan.spot || "square";
-  const free = isFreeVisit(run.courtesanAffinity, key);
+  const free = isFreeVisit(state.run.courtesanAffinity, key);
   const state = buildCourtesanDialogue(variant, {
     ...dialogContext(),
     free,
-    knownIntel: run.intel || {},
+    knownIntel: state.run.intel || {},
   });
 
-  ui.closeCourtesan();
+  state.ui.closeCourtesan();
   game.dialog = {
     kind: "courtesan",
     personId: courtesan.id,
@@ -904,12 +872,12 @@ function talkToCivilian(civilianId) {
   if (!person) return;
 
   bumpVisits(person);
-  const line = civilianLine(person, run.seed);
+  const line = civilianLine(person, state.run.seed);
 
   // Задание на расспросы: считаем РАЗНЫХ жителей, а не визиты.
-  if (run.quest && run.quest.active && run.quest.active.type === QUEST_TYPES.LISTEN) {
-    if (!run.quest.askedPeople.includes(person.id)) {
-      run.quest.askedPeople.push(person.id);
+  if (state.run.quest && state.run.quest.active && state.run.quest.active.type === QUEST_TYPES.LISTEN) {
+    if (!state.run.quest.askedPeople.includes(person.id)) {
+      state.run.quest.askedPeople.push(person.id);
       refreshQuestState();
     }
   }
@@ -923,18 +891,18 @@ function talkToCivilian(civilianId) {
 
 function dialogContext() {
   return {
-    seed: run.seed,
+    seed: state.run.seed,
     // Отдельно от seed: seed у каждого NPC свой (для реплик),
     // а задание строится от сида забега — иначе обещание в диалоге
     // и выданное задание разъедутся.
-    runSeed: run.seed,
-    visits: run.visitIndex || 0,
-    gold: run.gold,
-    wanted: run.wanted || 0,
-    knownIntel: run.intel || {},
-    reputation: profile.reputation || 0,
+    runSeed: state.run.seed,
+    visits: state.run.visitIndex || 0,
+    gold: state.run.gold,
+    wanted: state.run.wanted || 0,
+    knownIntel: state.run.intel || {},
+    reputation: state.profile.reputation || 0,
     // Сторонний квест: что уже сделано по нему.
-    quest: run.quest || null,
+    quest: state.run.quest || null,
   };
 }
 
@@ -946,7 +914,7 @@ function openCivilianDialog(person, greetLine) {
     visits: person.visits || 0,
     // И свой сид на каждого: двое крестьян одного вида не должны
     // говорить одну и ту же фразу.
-    seed: hashSeed(`${run.seed}:${person.id}`),
+    seed: hashSeed(`${state.run.seed}:${person.id}`),
     npcId: person.id,
     npcKind: person.kind,
     npcLabel: person.label,
@@ -963,8 +931,8 @@ function openCivilianDialog(person, greetLine) {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
   showDialog();
   audio.ui();
 }
@@ -972,12 +940,12 @@ function openCivilianDialog(person, greetLine) {
 function showDialog() {
   const d = game.dialog;
   if (!d) return;
-  const view = dialogueView(d.state, run.gold);
+  const view = dialogueView(d.state, state.run.gold);
   const title = d.kind === "courtesan" ? d.label : `${d.label}`;
   const text = d.state.history.length === 0 && d.greetLine
     ? `${d.greetLine}\n\n${view.text}`
     : view.text;
-  ui.openDialog({ title, text, options: view.options });
+  state.ui.openDialog({ title, text, options: view.options });
 }
 
 function chooseDialogOption(optionId) {
@@ -988,14 +956,14 @@ function chooseDialogOption(optionId) {
   const option = node ? (node.options || []).find((o) => o.id === optionId) : null;
   if (!option) return;
 
-  const result = chooseOption(d.state, optionId, run.gold);
+  const result = chooseOption(d.state, optionId, state.run.gold);
   if (result.error) return;
 
   // Сначала списываем деньги: эффект применяется уже к оплаченному.
   const cost = option.cost || 0;
   if (cost > 0) {
-    if (run.gold < cost) return;
-    run.gold -= cost;
+    if (state.run.gold < cost) return;
+    state.run.gold -= cost;
     audio.coin();
   }
 
@@ -1005,7 +973,7 @@ function chooseDialogOption(optionId) {
   if (result.done) {
     closeDialogPanel();
     if (d.kind === "civilian") {
-      ui.message(`${d.label}: разговор окончен.`);
+      state.ui.message(`${d.label}: разговор окончен.`);
     }
     return;
   }
@@ -1020,13 +988,13 @@ function applyDialogEffect(effect) {
   if (effect.takeQuest) {
     const giver = game.dialog && game.dialog.giver;
     if (giver) {
-      const quest = makeQuest(run.seed, giver, 0);
+      const quest = makeQuest(state.run.seed, giver, 0);
       if (quest) {
-        run.quest.active = { ...quest, state: "active" };
-        run.quest.beasts = {};
-        run.quest.visited = {};
-        run.quest.askedPeople = [];
-        ui.message(`${giver.label}: задание взято — ${quest.description.toLowerCase()}.`);
+        state.run.quest.active = { ...quest, state: "active" };
+        state.run.quest.beasts = {};
+        state.run.quest.visited = {};
+        state.run.quest.askedPeople = [];
+        state.ui.message(`${giver.label}: задание взято — ${quest.description.toLowerCase()}.`);
         saveCheckpoint(CHECKPOINT_REASONS.SOLD);
       }
     }
@@ -1035,17 +1003,17 @@ function applyDialogEffect(effect) {
 
   // Сдали задание.
   if (effect.claimQuest) {
-    const quest = run.quest && run.quest.active;
+    const quest = state.run.quest && state.run.quest.active;
     if (!quest) return;
     const reward = questReward(quest);
-    run.gold += reward.gold;
-    profile = {
+    state.run.gold += reward.gold;
+    state.profile = {
       ...profile,
-      reputation: (profile.reputation || 0) + reward.rep,
+      reputation: (state.profile.reputation || 0) + reward.rep,
       stats: { ...profile.stats },
     };
-    run.quest.active = null;
-    ui.message(`Задание выполнено: +${reward.gold} зм., +${reward.rep} репутации.`);
+    state.run.quest.active = null;
+    state.ui.message(`Задание выполнено: +${reward.gold} зм., +${reward.rep} репутации.`);
     audio.coin();
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
     return;
@@ -1053,12 +1021,12 @@ function applyDialogEffect(effect) {
 
   // Хлеб у торговки: еда в инвентарь, без наценки.
   if (effect.food) {
-    const item = { id: `bread-${run.visitIndex || 0}`, name: "Хлеб", value: 4, weight: 0.6, kind: "food", heal: 12 };
-    if (!addItem(run.inventory, item)) {
-      ui.message("Руки заняты. Хлеб остался у неё.");
-      run.gold += 3;
+    const item = { id: `bread-${state.run.visitIndex || 0}`, name: "Хлеб", value: 4, weight: 0.6, kind: "food", heal: 12 };
+    if (!addItem(state.run.inventory, item)) {
+      state.ui.message("Руки заняты. Хлеб остался у неё.");
+      state.run.gold += 3;
     } else {
-      ui.message("Вы купили хлеб.");
+      state.ui.message("Вы купили хлеб.");
       saveCheckpoint(CHECKPOINT_REASONS.SOLD);
     }
     return;
@@ -1066,12 +1034,12 @@ function applyDialogEffect(effect) {
 
   // Милостыня: репутация растёт, деньги уже списаны.
   if (effect.rep) {
-    profile = {
+    state.profile = {
       ...profile,
-      reputation: (profile.reputation || 0) + effect.rep,
+      reputation: (state.profile.reputation || 0) + effect.rep,
       stats: { ...profile.stats },
     };
-    ui.message(`Вы подали монету. +${effect.rep} репутации.`);
+    state.ui.message(`Вы подали монету. +${effect.rep} репутации.`);
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
     return;
   }
@@ -1080,15 +1048,15 @@ function applyDialogEffect(effect) {
   if (effect.bless) {
     const heal = Math.min(20, player.maxHealth - player.health);
     player.health = Math.min(player.maxHealth, player.health + 20);
-    ui.message(heal > 0 ? `Благословение: +${heal} здоровья.` : "Благословение принято.");
+    state.ui.message(heal > 0 ? `Благословение: +${heal} здоровья.` : "Благословение принято.");
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
     return;
   }
 
   // Купленный факт у куртизанки: запоминаем в ране.
   if (effect.intel) {
-    run.intel = { ...(run.intel || {}), [effect.intel]: true };
-    ui.message(`Запомнили: ${INTEL_SUMMARY[effect.intel] || "сведения записаны."}`);
+    state.run.intel = { ...(state.run.intel || {}), [effect.intel]: true };
+    state.ui.message(`Запомнили: ${INTEL_SUMMARY[effect.intel] || "сведения записаны."}`);
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
   }
 }
@@ -1101,7 +1069,7 @@ const INTEL_SUMMARY = {
 };
 
 function closeDialogPanel() {
-  ui.closeDialog();
+  state.ui.closeDialog();
   if (game.dialog && game.dialog.kind === "courtesan") {
     // Диалог куртизанки закрыт — возвращаться в её панель через E нельзя,
     // иначе activeCourtesan останется висеть и следующий E откроет чужой разговор.
@@ -1119,13 +1087,13 @@ function openConsole() {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.openConsole();
-  ui.consoleClear();
-  ui.consolePrint("Консоль разработчика. help — список команд.", "cmd");
+  state.ui.openConsole();
+  state.ui.consoleClear();
+  state.ui.consolePrint("Консоль разработчика. help — список команд.", "cmd");
 }
 
 function closeConsole() {
-  ui.closeConsole();
+  state.ui.closeConsole();
   game.uiOpen = false;
   input.requestLock();
 }
@@ -1133,7 +1101,7 @@ function closeConsole() {
 function consoleHistory(direction) {
   const history = game.consoleHistory;
   if (!history.length) return;
-  const inputEl = ui.consoleInput();
+  const inputEl = state.ui.consoleInput();
   let index = game.consoleHistoryIndex;
   index += direction;
   if (index < 0) index = 0;
@@ -1153,32 +1121,32 @@ function runConsoleCommand(raw) {
 
   game.consoleHistory.push(text);
   game.consoleHistoryIndex = game.consoleHistory.length;
-  ui.consolePrint(`> ${text}`, "cmd");
+  state.ui.consolePrint(`> ${text}`, "cmd");
 
   const result = runCommand(text, cheatContext());
-  if (result.message) ui.consolePrint(result.message, result.ok ? "ok" : "err");
-  if (!result.ok && result.message === "") ui.consolePrint("Пустая команда.", "err");
+  if (result.message) state.ui.consolePrint(result.message, result.ok ? "ok" : "err");
+  if (!result.ok && result.message === "") state.ui.consolePrint("Пустая команда.", "err");
 }
 
 function cheatContext() {
   return {
     game,
-    run,
+    run: state.run,
     player,
     world,
-    profile,
+    profile: state.profile,
     setTier(value) {
-      run.tier = value;
-      spawnCamp(world, run.tier, tuningFor(run.style));
-      run.archetype = world.archetype;
+      state.run.tier = value;
+      spawnCamp(world, state.run.tier, tuningFor(state.run.style));
+      state.run.archetype = world.archetype;
       respawnWildlifeAndCourtesan();
     },
     setAct(value) {
-      run.act = value;
+      state.run.act = value;
       refreshContracts();
     },
     setWeather(kind) {
-      if (!game.weather) game.weather = createWeather(run.seed);
+      if (!game.weather) game.weather = createWeather(state.run.seed);
       setWeather(game.weather, kind);
     },
   };
@@ -1190,20 +1158,20 @@ function openAdvicePanel() {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.openAdvice(
+  state.ui.openAdvice(
     buildAdvicePanel({
-      run,
+      run: state.run,
       world,
       player,
       game,
-      profile,
+      profile: state.profile,
     })
   );
   audio.ui();
 }
 
 function closeAdvicePanel() {
-  ui.closeAdvice();
+  state.ui.closeAdvice();
   game.uiOpen = false;
   input.requestLock();
 }
@@ -1215,22 +1183,22 @@ function titanDeath() {
   player.dead = true;
   game.gameOver = true;
   input.exitLock();
-  ui.closeTrade();
-  ui.closeLoot();
-  ui.closeCourtesan();
-  ui.closeTitan();
-  ui.hideHelp();
+  state.ui.closeTrade();
+  state.ui.closeLoot();
+  state.ui.closeCourtesan();
+  state.ui.closeTitan();
+  state.ui.hideHelp();
   game.uiOpen = false;
   game.stealing = false;
   game.stealProgress = 0;
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
   audio.death();
 
-  profile = { ...profile, stats: { ...profile.stats, deaths: (profile.stats.deaths || 0) + 1 } };
-  writeSave(profile, null);
+  state.profile = { ...profile, stats: { ...profile.stats, deaths: (state.profile.stats.deaths || 0) + 1 } };
+  writeSave(state.profile, null);
 
-  ui.showEnd(
+  state.ui.showEnd(
     "Титан не оставил ничего",
     "Ни имени, ни вещей, ни следа. Дорога начинается заново — но то, что ты знал, осталось с тобой. Репутация и разблокировки целы.",
     false
@@ -1240,7 +1208,7 @@ function titanDeath() {
 // ── Диалог с титаном ─────────────────────────────────────────────────
 
 function startTitanDialogue() {
-  if (!world.titan || run.titanPacified) return;
+  if (!world.titan || state.run.titanPacified) return;
 
   // Титан замирает на время разговора. Раньше он продолжал жевать:
   // таймер поедания шёл независимо от того, открыта ли панель,
@@ -1251,7 +1219,7 @@ function startTitanDialogue() {
   world.titan.spriteKey = "titan_calm";
 
   game.titanDialogue = {
-    questions: titanQuestions(run.seed),
+    questions: titanQuestions(state.run.seed),
     index: 0,
     correct: 0,
   };
@@ -1259,8 +1227,8 @@ function startTitanDialogue() {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
   showTitanQuestion();
 }
 
@@ -1282,9 +1250,9 @@ function leaveTitan() {
   if (!game.titanDialogue) return;
   game.titanDialogue = null;
   game.uiOpen = false;
-  ui.closeTitan();
+  state.ui.closeTitan();
   releaseTitan();
-  ui.message("Титан провожает тебя взглядом, но не двигается.");
+  state.ui.message("Титан провожает тебя взглядом, но не двигается.");
   input.requestLock();
 }
 
@@ -1295,7 +1263,7 @@ function showTitanQuestion() {
   const q = d.questions[d.index];
   if (!q) return;
 
-  ui.openTitan({
+  state.ui.openTitan({
     question: q.text,
     answers: q.answers,
     hint: q.hint,
@@ -1312,10 +1280,10 @@ function answerTitan(index) {
 
   if (!correct) {
     // Ошибся — он ест. Без вариантов.
-    ui.closeTitan();
+    state.ui.closeTitan();
     game.titanDialogue = null;
     game.uiOpen = false;
-    ui.message(TITAN_FAIL_LINE);
+    state.ui.message(TITAN_FAIL_LINE);
     titanDeath();
     return;
   }
@@ -1325,12 +1293,12 @@ function answerTitan(index) {
 
   if (d.index >= d.questions.length) {
     // Прошёл все три.
-    run.titanPacified = true;
+    state.run.titanPacified = true;
     world.titan = null;
     game.titanDialogue = null;
     game.uiOpen = false;
-    ui.closeTitan();
-    ui.message(TITAN_PASS_LINE);
+    state.ui.closeTitan();
+    state.ui.message(TITAN_PASS_LINE);
     audio.victory();
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
     input.requestLock();
@@ -1354,7 +1322,7 @@ function tryMountHorse(horseId) {
   const check = canMount({ mounted: game.mounted, blocking: player.blocking }, horse, tile, dist);
 
   if (!check.ok) {
-    ui.message(mountReasonText(check.reason));
+    state.ui.message(mountReasonText(check.reason));
     return;
   }
 
@@ -1363,7 +1331,7 @@ function tryMountHorse(horseId) {
   player.crouching = false;
   player.blocking = false;
   audio.ui();
-  ui.message(`${horse.label}: вы в седле. H — спешиться.`);
+  state.ui.message(`${horse.label}: вы в седле. H — спешиться.`);
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
 }
 
@@ -1385,7 +1353,7 @@ function dismountHorse() {
   game.mounted = null;
   game.horseRef = null;
   audio.ui();
-  ui.message("Вы спешились.");
+  state.ui.message("Вы спешились.");
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
 }
 
@@ -1400,13 +1368,13 @@ function openHelp() {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.showHelp();
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.showHelp();
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
 }
 
 function closeHelp() {
-  ui.hideHelp();
+  state.ui.hideHelp();
   game.uiOpen = false;
   input.requestLock();
 }
@@ -1415,42 +1383,42 @@ function openTrade() {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.setPrompt(null);
-  ui.setProgress(null);
-  ui.openTrade(tradeState());
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
+  state.ui.openTrade(tradeState());
   audio.ui();
 }
 
 function closeTrade() {
-  ui.closeTrade();
+  state.ui.closeTrade();
   game.uiOpen = false;
   input.requestLock();
 }
 
 function tradeState() {
   return {
-    gold: run.gold,
-    upgrades: run.upgrades,
-    inventory: run.inventory,
-    wanted: run.wanted,
-    profile,
-    contractOffer: run.contractOffer,
-    activeContract: run.activeContract,
+    gold: state.run.gold,
+    upgrades: state.run.upgrades,
+    inventory: state.run.inventory,
+    wanted: state.run.wanted,
+    profile: state.profile,
+    contractOffer: state.run.contractOffer,
+    activeContract: state.run.activeContract,
     priceModifier: priceModifier(),
     haggleLeft: rollsLeft(game.haggleRolled || 0),
   };
 }
 
 function priceModifier() {
-  return (1 + bonuses().priceBonus) * pricesAt(run.dayTime) * tuningFor(run.style).priceBonus;
+  return (1 + bonuses().priceBonus) * pricesAt(state.run.dayTime) * tuningFor(state.run.style).priceBonus;
 }
 
 function questSnapshot() {
   return {
-    beastsSince: (run.quest && run.quest.beasts) || {},
-    items: run.inventory.items,
-    visited: (run.quest && run.quest.visited) || {},
-    askedPeople: (run.quest && run.quest.askedPeople) || [],
+    beastsSince: (state.run.quest && state.run.quest.beasts) || {},
+    items: state.run.inventory.items,
+    visited: (state.run.quest && state.run.quest.visited) || {},
+    askedPeople: (state.run.quest && state.run.quest.askedPeople) || [],
   };
 }
 
@@ -1458,12 +1426,12 @@ function questSnapshot() {
 // Награду не выдаёт: за ней надо вернуться к жителю, иначе задание
 // закрывалось бы само где-нибудь в лесу без всякого разговора.
 function refreshQuestState() {
-  const quest = run.quest && run.quest.active;
+  const quest = state.run.quest && state.run.quest.active;
   if (!quest || quest.state === "complete") return;
   const result = checkQuest(quest, questSnapshot());
   if (result.status === "complete") {
     quest.state = "complete";
-    ui.message(`${quest.giverLabel}: «${questProgressText(quest, questSnapshot())}.» Вернитесь и расскажите.`);
+    state.ui.message(`${quest.giverLabel}: «${questProgressText(quest, questSnapshot())}.» Вернитесь и расскажите.`);
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
   }
 }
@@ -1477,20 +1445,20 @@ const VISIT_PLACES = {
 };
 
 function noteVisitedPlaces() {
-  const quest = run.quest && run.quest.active;
+  const quest = state.run.quest && state.run.quest.active;
   if (!quest || quest.type !== QUEST_TYPES.REACH) return;
 
   const zoneName = VISIT_PLACES[quest.targetId];
   const zone = zoneName ? ZONES[zoneName] : null;
   if (!zone) return;
-  if (run.quest.visited[quest.targetId]) return;
+  if (state.run.quest.visited[quest.targetId]) return;
 
   if (
     player.x >= zone.x0 && player.x <= zone.x1 &&
     player.y >= zone.y0 && player.y <= zone.y1
   ) {
-    run.quest.visited[quest.targetId] = true;
-    ui.message(`${quest.giverLabel}: вы дошли до места.`);
+    state.run.quest.visited[quest.targetId] = true;
+    state.ui.message(`${quest.giverLabel}: вы дошли до места.`);
     refreshQuestState();
   }
 }
@@ -1522,129 +1490,129 @@ function trackFootsteps(dt) {
 // ── Экономика ───────────────────────────────────────────────────────
 
 function sellLoot() {
-  if (!ui.tradeOpen || !run) return;
-  const value = totalValue(run.inventory);
+  if (!state.ui.tradeOpen || !state.run) return;
+  const value = totalValue(state.run.inventory);
   if (value <= 0) return;
 
-  const earned = Math.round(value * sellMultiplier(run.upgrades, priceModifier()));
-  run.gold += earned;
-  run.totalSold += earned;
-  run.counters.totalGoldEarned += earned;
-  run.inventory.items = [];
+  const earned = Math.round(value * sellMultiplier(state.run.upgrades, priceModifier()));
+  state.run.gold += earned;
+  state.run.totalSold += earned;
+  state.run.counters.totalGoldEarned += earned;
+  state.run.inventory.items = [];
   audio.coin();
-  ui.message(`Мардо отсчитал ${earned} зм.`);
+  state.ui.message(`Мардо отсчитал ${earned} зм.`);
   if (earned >= 120) noteStyle("sell_high");
 
-  if (world.wagonLooted && !run.lootSoldForTier) {
-    run.lootSoldForTier = true;
-    run.pendingCaravan = true;
-    run.caravanTimer = 12;
-    ui.message("Слух: на северной дороге скоро появится новый караван.");
+  if (world.wagonLooted && !state.run.lootSoldForTier) {
+    state.run.lootSoldForTier = true;
+    state.run.pendingCaravan = true;
+    state.run.caravanTimer = 12;
+    state.ui.message("Слух: на северной дороге скоро появится новый караван.");
   }
 
-  ui.renderTrade(tradeState());
+  state.ui.renderTrade(tradeState());
   checkActProgress();
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
 }
 
 function buyerPrice(value) {
   // Базовая цена продажи: та же, что показана на кнопке.
-  return Math.round(value * sellMultiplier(run.upgrades, priceModifier()));
+  return Math.round(value * sellMultiplier(state.run.upgrades, priceModifier()));
 }
 
 // Торг: бросок кубика против Мардо. Выиграл — наценка, проиграл —
 // скидка. Продажа совершается сразу: иначе игрок мог бы бросить,
 // увидеть проигрыш и закрыть панель без последствий.
 function haggleSell() {
-  if (!ui.tradeOpen || !run) return;
+  if (!state.ui.tradeOpen || !state.run) return;
 
-  const value = totalValue(run.inventory);
+  const value = totalValue(state.run.inventory);
   const left = rollsLeft(game.haggleRolled || 0);
   if (!canHaggle(value, game.haggleRolled || 0)) {
-    if (value <= 0) ui.message("Продавать нечего.");
-    else ui.message("Мардо отворачивается: «Хватит. Цена окончательная.»");
+    if (value <= 0) state.ui.message("Продавать нечего.");
+    else state.ui.message("Мардо отворачивается: «Хватит. Цена окончательная.»");
     return;
   }
 
-  const result = rollHaggle(makeHaggleRng(run.seed, game.haggleRolled || 0, run.visitIndex || 0));
+  const result = rollHaggle(makeHaggleRng(state.run.seed, game.haggleRolled || 0, state.run.visitIndex || 0));
   game.haggleRolled = (game.haggleRolled || 0) + 1;
 
   const earned = haggledPrice(buyerPrice(value), result);
-  run.gold += earned;
-  run.totalSold += earned;
-  run.counters.totalGoldEarned += earned;
-  run.inventory.items = [];
+  state.run.gold += earned;
+  state.run.totalSold += earned;
+  state.run.counters.totalGoldEarned += earned;
+  state.run.inventory.items = [];
 
   audio.coin();
-  ui.message(`Мардо: ${rollText(result)}`);
-  ui.message(`Отсчитал ${earned} зм.`);
+  state.ui.message(`Мардо: ${rollText(result)}`);
+  state.ui.message(`Отсчитал ${earned} зм.`);
   if (result.won) noteStyle("sell_high");
 
-  if (world.wagonLooted && !run.lootSoldForTier) {
-    run.lootSoldForTier = true;
-    run.pendingCaravan = true;
-    run.caravanTimer = 12;
-    ui.message("Слух: на северной дороге скоро появится новый караван.");
+  if (world.wagonLooted && !state.run.lootSoldForTier) {
+    state.run.lootSoldForTier = true;
+    state.run.pendingCaravan = true;
+    state.run.caravanTimer = 12;
+    state.ui.message("Слух: на северной дороге скоро появится новый караван.");
   }
 
-  ui.renderTrade(tradeState());
+  state.ui.renderTrade(tradeState());
   checkActProgress();
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
 }
 
 function buyUpgrade(id) {
-  if (!ui.tradeOpen || !run) return;
-  if (!(id in run.upgrades)) return;
-  const result = purchase(run.gold, run.upgrades, id);
+  if (!state.ui.tradeOpen || !state.run) return;
+  if (!(id in state.run.upgrades)) return;
+  const result = purchase(state.run.gold, state.run.upgrades, id);
   if (!result) return;
-  run.gold = result.gold;
-  run.upgrades = result.upgrades;
+  state.run.gold = result.gold;
+  state.run.upgrades = result.upgrades;
   audio.coin();
-  ui.message(`Куплено улучшение.`);
-  ui.renderTrade(tradeState());
+  state.ui.message(`Куплено улучшение.`);
+  state.ui.renderTrade(tradeState());
 }
 
 function buyUnlock(id) {
-  if (!ui.tradeOpen) return;
-  const next = unlock(profile, id);
+  if (!state.ui.tradeOpen) return;
+  const next = unlock(state.profile, id);
   if (!next) return;
-  profile = next;
+  state.profile = next;
   audio.coin();
-  ui.message(`Открыто навсегда: ${id}.`);
-  ui.renderTrade(tradeState());
-  writeSave(profile, run ? snapshotRun(run, player) : null);
+  state.ui.message(`Открыто навсегда: ${id}.`);
+  state.ui.renderTrade(tradeState());
+  writeSave(state.profile, state.run ? snapshotRun(state.run, player) : null);
 }
 
 function payFine() {
-  if (!ui.tradeOpen || !run) return;
-  const cost = fineFor(run.wanted);
+  if (!state.ui.tradeOpen || !state.run) return;
+  const cost = fineFor(state.run.wanted);
   if (cost <= 0) return;
-  if (run.gold < cost) {
-    ui.message("Не хватает золота на штраф.");
+  if (state.run.gold < cost) {
+    state.ui.message("Не хватает золота на штраф.");
     return;
   }
-  run.gold -= cost;
-  run.wanted = 0;
+  state.run.gold -= cost;
+  state.run.wanted = 0;
   const guard = world.villageGuard;
   guard.state = "idle";
   guard.suspicion = 0;
   guard.alerted = false;
   audio.coin();
-  ui.message("Штраф уплачен. Стража больше не ищет вас.");
-  ui.renderTrade(tradeState());
+  state.ui.message("Штраф уплачен. Стража больше не ищет вас.");
+  state.ui.renderTrade(tradeState());
   saveCheckpoint(CHECKPOINT_REASONS.SOLD);
 }
 
 // ── Обыск фургона ───────────────────────────────────────────────────
 
 function startLoot(second = false) {
-  const tier = run.tier;
+  const tier = state.run.tier;
   // Раньше было `2 + tier`, и одновременно rollLoot умножал цену на
   // 1 + (tier-1)*0.25. Два множителя по тиру сразу: на tier 3 доход
   // удваивался скачком, и вся игра проходилась за пять караванов.
   // Теперь количество растёт в полтора раза медленнее.
-  const count = 2 + Math.floor(tier / 2) + tuningFor(run.style).lootCount;
-  game.lootBuffer = rollLoot(tier, rng, count);
+  const count = 2 + Math.floor(tier / 2) + tuningFor(state.run.style).lootCount;
+  game.lootBuffer = rollLoot(tier, state.rng, count);
   game.lootSecondWagon = second;
 
   const witnessed = world.campGuards.some(
@@ -1657,63 +1625,63 @@ function startLoot(second = false) {
   game.uiOpen = true;
   input.clear();
   input.exitLock();
-  ui.openLoot(game.lootBuffer);
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.openLoot(game.lootBuffer);
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
 }
 
 function takeLoot(index) {
-  if (!ui.lootOpen || !game.lootBuffer) return;
+  if (!state.ui.lootOpen || !game.lootBuffer) return;
   const item = game.lootBuffer[index];
   if (!item) return;
 
-  if (!addItem(run.inventory, item)) {
-    ui.message("Не помещается — несите, что есть.");
+  if (!addItem(state.run.inventory, item)) {
+    state.ui.message("Не помещается — несите, что есть.");
     return;
   }
   game.lootBuffer.splice(index, 1);
-  ui.renderLoot(game.lootBuffer);
+  state.ui.renderLoot(game.lootBuffer);
   if (game.lootBuffer.length === 0) finishLoot();
 }
 
 function finishLoot() {
-  if (!run) return;
-  const taken = run.inventory.items.length;
+  if (!state.run) return;
+  const taken = state.run.inventory.items.length;
   const wasSecond = game.lootSecondWagon;
 
   if (wasSecond) {
     if (world.secondWagon) world.secondWagon.looted = true;
-    run.secondWagonLooted = true;
+    state.run.secondWagonLooted = true;
   } else {
     world.wagonLooted = true;
-    run.wagonLooted = true;
+    state.run.wagonLooted = true;
   }
 
-  const coin = 18 + run.tier * 8;
-  run.gold += coin;
+  const coin = 18 + state.run.tier * 8;
+  state.run.gold += coin;
 
   if (game.lootWitnessed) {
-    run.wanted = Math.min(5, Math.max(run.wanted, 1));
+    state.run.wanted = Math.min(5, Math.max(state.run.wanted, 1));
     noteStyle("witnessed");
-    ui.message("Стража видела ограбление! Розыск +1.");
+    state.ui.message("Стража видела ограбление! Розыск +1.");
   } else {
     noteStyle("silent_loot");
-    run.counters.silentLoots += 1;
-    const bonus = Math.round(coin * (tuningFor(run.style).silentBonus - 1));
+    state.run.counters.silentLoots += 1;
+    const bonus = Math.round(coin * (tuningFor(state.run.style).silentBonus - 1));
     if (bonus > 0) {
-      run.gold += bonus;
-      ui.message(`Тихо и чисто: +${bonus} зм. за бесшумность.`);
+      state.run.gold += bonus;
+      state.ui.message(`Тихо и чисто: +${bonus} зм. за бесшумность.`);
     }
   }
 
-  run.counters.lootsSinceAccept += 1;
+  state.run.counters.lootsSinceAccept += 1;
   game.lootBuffer = null;
   game.lootSecondWagon = false;
   game.lootWitnessed = false;
   game.uiOpen = false;
-  ui.closeLoot();
+  state.ui.closeLoot();
   audio.coin();
-  ui.message(`Из фургона вынесено ${taken} тюков и ${coin} зм.`);
+  state.ui.message(`Из фургона вынесено ${taken} тюков и ${coin} зм.`);
 
   evaluateContract();
   checkActProgress();
@@ -1733,15 +1701,15 @@ function performAttack() {
     titan.alive &&
     Math.hypot(titan.x - player.x, titan.y - player.y) < 2.6
   ) {
-    player.attackCd = attackCooldown(run.upgrades.sword);
+    player.attackCd = attackCooldown(state.run.upgrades.sword);
     player.swingT = 0.34;
     audio.swing();
     audio.hit();
-    ui.message("Клинок отскакивает, будто от скалы. Его нельзя убить.");
+    state.ui.message("Клинок отскакивает, будто от скалы. Его нельзя убить.");
     return;
   }
 
-  player.attackCd = attackCooldown(run.upgrades.sword);
+  player.attackCd = attackCooldown(state.run.upgrades.sword);
   player.swingT = 0.34;
   audio.swing();
   game.noiseTimer = 0.5;
@@ -1803,17 +1771,17 @@ function performAttack() {
   }
 
   // С седла бьёшь хуже: замах короче, опора хуже.
-  const baseDmg = damageRoll(12 + run.upgrades.sword * 5, rng);
+  const baseDmg = damageRoll(12 + state.run.upgrades.sword * 5, state.rng);
   const dmg = game.mounted ? mountedDamage(baseDmg) : baseDmg;
 
   if (targetIsAnimal) {
-    ui.flashHit();
+    state.ui.flashHit();
     audio.hit();
     const result = animalOnHit(target, dmg);
     if (result.killed) {
       killAnimal(result.animal, result.drops);
     } else {
-      ui.message(`Вы ранили ${SPECIES_DEFS[target.kind].label.toLowerCase()} (-${dmg}).`);
+      state.ui.message(`Вы ранили ${SPECIES_DEFS[target.kind].label.toLowerCase()} (-${dmg}).`);
       audio.beast?.(target.kind);
     }
     return;
@@ -1821,7 +1789,7 @@ function performAttack() {
 
   target.hp -= dmg;
   if (target.asleep) target.asleep = false;
-  ui.flashHit();
+  state.ui.flashHit();
   // Стражник хрипит от попадания, обычные цели — просто удар.
   if (target.kind === "guard" || target.kind === "village_guard" || target.kind === "driver") {
     audio.guardHit();
@@ -1848,11 +1816,11 @@ function performAttack() {
     target.state = "chase";
     target.suspicion = 1.2;
     target.lostTimer = 0;
-    run.wanted = Math.min(5, run.wanted + 1);
+    state.run.wanted = Math.min(5, state.run.wanted + 1);
   }
 
   const label = target.kind === "driver" ? "возницу" : "стражника";
-  ui.message(`Вы ранили ${label} (-${dmg}).`);
+  state.ui.message(`Вы ранили ${label} (-${dmg}).`);
 }
 
 // Убийство животного: добыча в инвентарь, розыск НЕ начисляется.
@@ -1861,17 +1829,17 @@ function killAnimal(animal, drops) {
   let taken = 0;
 
   // Задание на охоту: считаем по видам, а не «всего зверей».
-  if (run.quest && run.quest.active && run.quest.active.type === QUEST_TYPES.HUNT) {
-    run.quest.beasts[animal.kind] = (run.quest.beasts[animal.kind] || 0) + 1;
+  if (state.run.quest && state.run.quest.active && state.run.quest.active.type === QUEST_TYPES.HUNT) {
+    state.run.quest.beasts[animal.kind] = (state.run.quest.beasts[animal.kind] || 0) + 1;
     refreshQuestState();
   }
 
   for (const drop of drops) {
-    if (addItem(run.inventory, drop)) taken++;
+    if (addItem(state.run.inventory, drop)) taken++;
   }
 
   const value = drops.reduce((sum, d) => sum + d.value, 0);
-  ui.message(
+  state.ui.message(
     taken > 0
       ? `Вы убили ${def.label.toLowerCase()}. Добыча: ${drops.map((d) => d.name).join(", ")} (${value} зм.).`
       : `Вы убили ${def.label.toLowerCase()}, но добыча не поместилась.`
@@ -1904,13 +1872,13 @@ function killActor(actor) {
   actor.hp = 0;
   actor.state = "dead";
 
-  const tuning = tuningFor(run.style);
-  const drop = Math.round((6 + run.tier * 3 + Math.floor(rng() * 6)) * tuning.killDrop);
-  run.gold += drop;
-  run.wanted = Math.min(5, run.wanted + 1);
-  run.counters.kills += 1;
-  run.counters.killsSinceAccept += 1;
-  if (actor.kind === "driver") run.counters.driverKilledSinceAccept = true;
+  const tuning = tuningFor(state.run.style);
+  const drop = Math.round((6 + state.run.tier * 3 + Math.floor(state.rng() * 6)) * tuning.killDrop);
+  state.run.gold += drop;
+  state.run.wanted = Math.min(5, state.run.wanted + 1);
+  state.run.counters.kills += 1;
+  state.run.counters.killsSinceAccept += 1;
+  if (actor.kind === "driver") state.run.counters.driverKilledSinceAccept = true;
   noteStyle("kill");
   audio.guardDeath();
   audio.coin();
@@ -1921,7 +1889,7 @@ function killActor(actor) {
       : actor.kind === "village_guard"
         ? "городского стражника"
         : "стражника";
-  ui.message(`Вы убили ${label}. Добыча: ${drop} зм. Розыск +1.`);
+  state.ui.message(`Вы убили ${label}. Добыча: ${drop} зм. Розыск +1.`);
   evaluateContract();
   checkActProgress();
 }
@@ -1931,7 +1899,7 @@ function damagePlayer(amount, source) {
   // Режим разработчика: урон не проходит.
   if (game.godMode) return;
 
-  let raw = damageRoll(amount, rng);
+  let raw = damageRoll(amount, state.rng);
 
   // Блок гасит урон только спереди и тратит выносливость.
   if (player.blocking && source && Number.isFinite(source.x)) {
@@ -1942,7 +1910,7 @@ function damagePlayer(amount, source) {
       raw = result.damage;
       if (result.broke) {
         player.blockBroke = 0.5;
-        ui.message("Блок пробит — выносливость на нуле!");
+        state.ui.message("Блок пробит — выносливость на нуле!");
         audio.hit();
       } else {
         audio.block();
@@ -1950,7 +1918,7 @@ function damagePlayer(amount, source) {
     }
   }
 
-  const dmg = applyArmor(raw, run.upgrades.armor);
+  const dmg = applyArmor(raw, state.run.upgrades.armor);
   // Запас бодрости принимает удар первым, здоровье — остатком.
   const absorbed = absorbWithOverheal(dmg, player.health, player.overheal);
   player.health = absorbed.health;
@@ -1965,7 +1933,7 @@ function damagePlayer(amount, source) {
       : source?.kind === "driver"
         ? "Возница"
         : "Стражник";
-  ui.message(`${label} ранил вас (-${dmg}).`);
+  state.ui.message(`${label} ранил вас (-${dmg}).`);
 
   if (player.health <= 0) die();
 }
@@ -1975,29 +1943,29 @@ function damagePlayer(amount, source) {
 function die() {
   player.dead = true;
   input.exitLock();
-  ui.closeTrade();
-  ui.closeLoot();
-  ui.hideHelp();
+  state.ui.closeTrade();
+  state.ui.closeLoot();
+  state.ui.hideHelp();
   game.uiOpen = false;
   game.stealing = false;
   game.stealProgress = 0;
-  ui.setPrompt(null);
-  ui.setProgress(null);
+  state.ui.setPrompt(null);
+  state.ui.setProgress(null);
   audio.death();
 
-  profile = { ...profile, stats: { ...profile.stats, deaths: (profile.stats.deaths || 0) + 1 } };
+  state.profile = { ...profile, stats: { ...profile.stats, deaths: (state.profile.stats.deaths || 0) + 1 } };
 
   // Берём последний чекпоинт и применяем штраф уже к нему,
   // иначе перезагрузка вернула бы потерянное золото.
   const checkpoint = readSave();
-  const loaded = restoreRun(checkpoint.run, profile, bonuses());
+  const loaded = restoreRun(checkpoint.run, state.profile, bonuses());
 
   if (!loaded) {
     newRun();
     player.dead = false;
     player.health = player.maxHealth;
     game.paused = true;
-    ui.showEnd("Вы очнулись у Мардо", "Забег был слишком коротким — начинаем заново. Репутация цела.", true);
+    state.ui.showEnd("Вы очнулись у Мардо", "Забег был слишком коротким — начинаем заново. Репутация цела.", true);
     return;
   }
 
@@ -2011,19 +1979,19 @@ function die() {
   base.offerIndex += 1;
 
   const penalty = softDeathPenalty(base);
-  run = penalty.run;
+  state.run = penalty.run;
   refreshContracts();
 
-  rng = createRng(run.seed);
-  rng.restore(run.rngState);
-  spawnCamp(world, run.tier, tuningFor(run.style));
+  state.rng = createRng(state.run.seed);
+  state.rng.restore(state.run.rngState);
+  spawnCamp(world, state.run.tier, tuningFor(state.run.style));
   syncRunToWorld();
 
-  if (playerPositionValid(world, run.player)) {
-    player.x = run.player.x;
-    player.y = run.player.y;
-    player.setAngle(run.player.angle || 0);
-    player.overheal = Math.max(0, Math.min(OVERHEAL_CAP, run.player.overheal || 0));
+  if (playerPositionValid(world, state.run.player)) {
+    player.x = state.run.player.x;
+    player.y = state.run.player.y;
+    player.setAngle(state.run.player.angle || 0);
+    player.overheal = Math.max(0, Math.min(OVERHEAL_CAP, state.run.player.overheal || 0));
   } else {
     player.reset(world.spawn);
   }
@@ -2036,11 +2004,11 @@ function die() {
   game.paused = true;
 
   // Чекпоинт уже со штрафом — сейв-скам не вернёт золото.
-  run.wanted = 0;
+  state.run.wanted = 0;
   saveCheckpoint(CHECKPOINT_REASONS.DEATH);
 
   const contractNote = failedContract ? ` Заказ «${contractName(failedContract.type)}» провален.` : "";
-  ui.showEnd(
+  state.ui.showEnd(
     "Вы очнулись у Мардо",
     `Вас вытащили из канавы. Потеряно ${penalty.lostGold} зм. и ${penalty.lostItems} тюков (${penalty.lostValue} зм. стоимости).${contractNote} Репутация и разблокировки целы.`,
     true
@@ -2061,23 +2029,23 @@ function applyBite(bite) {
   player.health = absorbed.health;
   player.overheal = absorbed.overheal;
   player.hurtFlash = 1;
-  run.bleed = applyBleed(run.bleed, bite.bleed);
+  state.run.bleed = applyBleed(state.run.bleed, bite.bleed);
   audio.hurt();
-  ui.message(`Лиса укусила вас (-${dmg}). Рана кровоточит.`);
+  state.ui.message(`Лиса укусила вас (-${dmg}). Рана кровоточит.`);
 
   if (player.health <= 0) die();
 }
 
 // Кровотечение тикает независимо от боя.
 function tickBleed(dt) {
-  if (!run.bleed || run.bleed.remaining <= 0) return;
+  if (!state.run.bleed || state.run.bleed.remaining <= 0) return;
   if (game.godMode) {
-    run.bleed = { remaining: 0, dps: 0 };
+    state.run.bleed = { remaining: 0, dps: 0 };
     return;
   }
 
-  const result = bleedTick(run.bleed, dt);
-  run.bleed = result.bleed;
+  const result = bleedTick(state.run.bleed, dt);
+  state.run.bleed = result.bleed;
   if (result.damage <= 0) return;
 
   player.health = Math.max(0, player.health - result.damage);
@@ -2091,48 +2059,48 @@ game.onGuardAlert = (actor) => {
   }
   if (game.time - game.lastAlertMsg > 3) {
     game.lastAlertMsg = game.time;
-    ui.message("Вас заметили!");
+    state.ui.message("Вас заметили!");
     audio.alert();
   }
-  if (run && run.activeContract && !run.counters.chaseSinceAccept) {
-    run.counters.chaseSinceAccept = true;
+  if (state.run && state.run.activeContract && !state.run.counters.chaseSinceAccept) {
+    state.run.counters.chaseSinceAccept = true;
     evaluateContract();
   }
 };
 
 function objectiveText() {
-  if (!run) return "";
-  const act = actOf(run);
+  if (!state.run) return "";
+  const act = actOf(state.run);
   let line;
-  if (run.activeContract) {
-    line = `Заказ: ${contractName(run.activeContract.type)}`;
-  } else if (!run.wagonLooted) {
+  if (state.run.activeContract) {
+    line = `Заказ: ${contractName(state.run.activeContract.type)}`;
+  } else if (!state.run.wagonLooted) {
     line = "Ограбьте караван на северной стоянке";
-  } else if (run.inventory.items.length > 0) {
+  } else if (state.run.inventory.items.length > 0) {
     line = "Продайте добычу Мардо в деревне";
-  } else if (run.pendingCaravan) {
-    line = `Новый караван через ${Math.max(1, Math.ceil(run.caravanTimer))} с`;
+  } else if (state.run.pendingCaravan) {
+    line = `Новый караван через ${Math.max(1, Math.ceil(state.run.caravanTimer))} с`;
   } else {
     line = "Возвращайтесь к Мардо за новым заказом";
   }
 
   // Стороннее задание показываем отдельной строкой: иначе о нём
   // напоминает только лента сообщений, которая давно прокрутилась.
-  const quest = run.quest && run.quest.active;
+  const quest = state.run.quest && state.run.quest.active;
   let questLine = "";
   if (quest) {
     const progress = questProgressText(quest, {
-      beastsSince: (run.quest.beasts || {}),
-      items: run.inventory.items,
-      visited: (run.quest.visited || {}),
-      askedPeople: (run.quest.askedPeople || []),
+      beastsSince: (state.run.quest.beasts || {}),
+      items: state.run.inventory.items,
+      visited: (state.run.quest.visited || {}),
+      askedPeople: (state.run.quest.askedPeople || []),
     });
     questLine = `\nПоручение: ${quest.description}${
       quest.state === "complete" ? " — можно сдать" : ` (${progress})`
     }`;
   }
 
-  return `${act.label} · ${line}${questLine}\nЦель: ${act.goal} зм. · продано на ${run.totalSold} зм.`;
+  return `${act.label} · ${line}${questLine}\nЦель: ${act.goal} зм. · продано на ${state.run.totalSold} зм.`;
 }
 
 // Живность: блуждание, побег, укусы. Животные не сохраняются — пересоздаются с караваном.
@@ -2181,7 +2149,7 @@ function updateTitan(dt) {
     // NPC просто исчезает: он его съел.
     result.victim.alive = false;
     if (result.victim.kind) {
-      ui.message(`Титан съел ${result.victim.label || result.victim.kind}.`);
+      state.ui.message(`Титан съел ${result.victim.label || result.victim.kind}.`);
     }
   }
 }
@@ -2191,12 +2159,12 @@ function updateGame(dt) {
   // Монотонное время игры: не замыкается, в отличие от dayTime.
   // Нужно для дедлайнов контрактов — иначе смена суток их обнуляет.
   game.clockTotal = (game.clockTotal || 0) + dt;
-  run.dayTime = (run.dayTime + dt) % 240;
+  state.run.dayTime = (state.run.dayTime + dt) % 240;
 
   // Лайтмап пересобирается НЕ каждый кадр: заливка 40 000 тайлов плюс
   // радиусы всех огней стоит дороже, чем весь рейкастинг. Мерцание
   // всё равно медленное — 10 раз в секунду достаточно.
-  const phase = phaseOf(run.dayTime);
+  const phase = phaseOf(state.run.dayTime);
   game.lightTimer = (game.lightTimer || 0) - dt;
   if (game.lightTimer <= 0 || game.lightPhase !== phase) {
     game.lightTimer = 0.1;
@@ -2246,21 +2214,21 @@ function updateGame(dt) {
       game.stealing = false;
       game.stealProgress = 0;
     } else {
-      game.stealProgress += dt / stealTime(run.upgrades.lockpick);
+      game.stealProgress += dt / stealTime(state.run.upgrades.lockpick);
       if (game.stealProgress >= 1) startLoot(Boolean(near.second));
     }
   }
 
   if (!game.stealing) {
     // Множитель скорости и noclip — только для режима разработчика.
-    run.speedMultiplier = game.speedMultiplier;
+    state.run.speedMultiplier = game.speedMultiplier;
     // Лошадь даёт свой множитель по типу поверхности.
-    run.horseMultiplier = game.mounted
+    state.run.horseMultiplier = game.mounted
       ? horseSpeed(tileAt(world, player.x, player.y))
       : 1;
-    run.mounted = Boolean(game.mounted);
+    state.run.mounted = Boolean(game.mounted);
     player.noclip = game.noclip;
-    player.update(world, input, dt, run, audio);
+    player.update(world, input, dt, state.run, audio);
   }
 
   // Приземление после прыжка слышно: стража просыпается от топота.
@@ -2288,9 +2256,9 @@ function updateGame(dt) {
   const aiContext = {
     world,
     player,
-    wanted: run.wanted,
+    wanted: state.run.wanted,
     noiseLevel: game.noiseLevel,
-    dayTime: run.dayTime,
+    dayTime: state.run.dayTime,
     damagePlayer,
     onGuardAlert: game.onGuardAlert,
   };
@@ -2302,37 +2270,37 @@ function updateGame(dt) {
 
   near = nearestInteraction(world, player);
   if (game.stealing) {
-    ui.setPrompt("Обыскиваете фургон… не дайте страже заметить вас");
-    ui.setProgress(game.stealProgress);
+    state.ui.setPrompt("Обыскиваете фургон… не дайте страже заметить вас");
+    state.ui.setProgress(game.stealProgress);
   } else if (near && near.type === "wagon") {
-    ui.setPrompt(near.label);
-    ui.setProgress(null);
+    state.ui.setPrompt(near.label);
+    state.ui.setProgress(null);
   } else if (near && near.type === "merchant") {
-    ui.setPrompt(near.label);
-    ui.setProgress(null);
+    state.ui.setPrompt(near.label);
+    state.ui.setProgress(null);
   } else {
-    ui.setPrompt(null);
-    ui.setProgress(null);
+    state.ui.setPrompt(null);
+    state.ui.setProgress(null);
   }
 
-  if (run.pendingCaravan) {
-    run.caravanTimer -= dt;
-    if (run.caravanTimer <= 0) {
+  if (state.run.pendingCaravan) {
+    state.run.caravanTimer -= dt;
+    if (state.run.caravanTimer <= 0) {
       const distToWagon = Math.hypot(player.x - world.wagon.x, player.y - world.wagon.y);
       if (distToWagon < 13) {
-        run.caravanTimer = 3;
+        state.run.caravanTimer = 3;
       } else {
-        run.tier += 1;
-        spawnCamp(world, run.tier, tuningFor(run.style));
-        run.archetype = world.archetype;
+        state.run.tier += 1;
+        spawnCamp(world, state.run.tier, tuningFor(state.run.style));
+        state.run.archetype = world.archetype;
         respawnWildlifeAndCourtesan();
-        run.wagonLooted = false;
-        run.secondWagonLooted = false;
-        run.pendingCaravan = false;
-        run.lootSoldForTier = false;
+        state.run.wagonLooted = false;
+        state.run.secondWagonLooted = false;
+        state.run.pendingCaravan = false;
+        state.run.lootSoldForTier = false;
         // Новый караван — новый разговор о цене: Мардо снова готов торговаться.
         game.haggleRolled = 0;
-        ui.message(`На северной дороге замечен новый караван — ${world.layout.label.toLowerCase()}.`);
+        state.ui.message(`На северной дороге замечен новый караван — ${world.layout.label.toLowerCase()}.`);
         saveCheckpoint(CHECKPOINT_REASONS.NEW_CARAVAN);
       }
     }
@@ -2342,25 +2310,25 @@ function updateGame(dt) {
 }
 
 function uiState() {
-  const phase = phaseOf(run ? run.dayTime : 0);
+  const phase = phaseOf(state.run ? state.run.dayTime : 0);
   return {
     player,
-    gold: run ? run.gold : 0,
-    reputation: profile.reputation || 0,
-    wanted: run ? run.wanted : 0,
-    bleed: run ? run.bleed : { remaining: 0, dps: 0 },
+    gold: state.run ? state.run.gold : 0,
+    reputation: state.profile.reputation || 0,
+    wanted: state.run ? state.run.wanted : 0,
+    bleed: state.run ? state.run.bleed : { remaining: 0, dps: 0 },
     weatherLabel: isWet(game.weather) ? weatherLabel(game.weather) : "",
     wet: isWet(game.weather),
-    inventory: run ? run.inventory : { capacity: 0, items: [] },
-    upgrades: run ? run.upgrades : {},
-    profile,
-    activeContract: run ? run.activeContract : null,
-    contractOffer: run ? run.contractOffer : [],
+    inventory: state.run ? state.run.inventory : { capacity: 0, items: [] },
+    upgrades: state.run ? state.run.upgrades : {},
+    profile: state.profile,
+    activeContract: state.run ? state.run.activeContract : null,
+    contractOffer: state.run ? state.run.contractOffer : [],
     contractTimeLeft: game.contractTimeLeft,
     noiseLevel: game.noiseLevel,
     phase,
-    styleKey: run ? styleKey() : "neutral",
-    archetype: run ? run.archetype : "road_camp",
+    styleKey: state.run ? styleKey() : "neutral",
+    archetype: state.run ? state.run.archetype : "road_camp",
     suppressFame: false,
   };
 }
@@ -2394,9 +2362,9 @@ function stepFrame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
 
-  if (run && canControl()) {
+  if (state.run && canControl()) {
     updateGame(dt);
-  } else if (run) {
+  } else if (state.run) {
     input.consumeMouse();
     game.noiseLevel = 0;
     game.suspicion = Math.max(0, game.suspicion - dt);
@@ -2408,20 +2376,20 @@ function stepFrame(now) {
     time: game.time,
     hurtFlash: player.hurtFlash,
     started: game.started,
-    light: run ? phaseOf(run.dayTime) : "day",
+    light: state.run ? phaseOf(state.run.dayTime) : "day",
     lightmap: game.lightmap,
     weather: game.weather,
     mounted: Boolean(game.mounted),
     // Сид нужен небу: звёзды и луна фиксированы на забег, иначе они мерцают.
-    seed: run ? run.seed : 0,
+    seed: state.run ? state.run.seed : 0,
     tracks: game.tracks || [],
     suspicionSource: (actor) => (actor.asleep ? 0 : actor.suspicion),
     showSuspicion: game.started && !game.gameOver,
   });
 
-  if (run) {
-    ui.update(uiState());
-    ui.setObjective(objectiveText());
+  if (state.run) {
+    state.ui.update(uiState());
+    state.ui.setObjective(objectiveText());
     // Дождь звучит только когда он есть и игра не на паузе.
     audio.rain(Boolean(game.weather && game.weather.raining) && game.started && !game.paused, game.weather ? game.weather.intensity : 0);
 
@@ -2429,7 +2397,7 @@ function stepFrame(now) {
     // что-то менять, поэтому вызывать каждый кадр безопасно.
     if (game.started && !game.paused && !game.gameOver) {
       const inTown = isInTown(player.x, player.y);
-      audio.stepMusic(run ? phaseOf(run.dayTime) : "day", inTown);
+      audio.stepMusic(state.run ? phaseOf(state.run.dayTime) : "day", inTown);
     } else {
       audio.musicStop(1.5);
     }
@@ -2464,7 +2432,12 @@ window.addEventListener("resize", applyCanvasScale);
 
 const debugEnabled = new URLSearchParams(window.location.search).has("debug");
 const startHasSave = hasSave();
-ui.showStart(startHasSave);
+state.ui.showStart(startHasSave);
+
+// Загрузка сейва профиля. Делается здесь, а не при объявлении переменных:
+// UI уже создан, контейнер готов, и профиль можно сразу положить в него.
+state.saved = readSave();
+state.profile = state.saved.profile;
 
 // Метка всегда в консоли: при кеше видно, что играешь не ту сборку.
 console.info(
@@ -2478,12 +2451,12 @@ if (debugEnabled) {
       return game;
     },
     get run() {
-      return run;
+      return state.run;
     },
     get profile() {
-      return profile;
+      return state.profile;
     },
-    ui,
+    ui: state.ui,
     input,
     player,
     world,
