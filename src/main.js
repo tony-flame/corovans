@@ -117,6 +117,7 @@ import {
   TRACK_LIMIT,
 } from "./ambience.js";
 import { createState } from "./core/state.js";
+import * as trade from "./systems/trade.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -1413,6 +1414,26 @@ function priceModifier() {
   return (1 + bonuses().priceBonus) * pricesAt(state.run.dayTime) * tuningFor(state.run.style).priceBonus;
 }
 
+// Контекст для systems/trade.js: модуль не знает про main.js и не держит
+// состояния, всё необходимое приходит сюда.
+function tradeCtx() {
+  return {
+    state,
+    game,
+    world,
+    player,
+    input,
+    audio,
+    tradeState,
+    priceModifier,
+    noteStyle,
+    saveCheckpoint,
+    checkActProgress,
+    evaluateContract,
+    writeSave,
+  };
+}
+
 function questSnapshot() {
   return {
     beastsSince: (state.run.quest && state.run.quest.beasts) || {},
@@ -1490,203 +1511,44 @@ function trackFootsteps(dt) {
 // ── Экономика ───────────────────────────────────────────────────────
 
 function sellLoot() {
-  if (!state.ui.tradeOpen || !state.run) return;
-  const value = totalValue(state.run.inventory);
-  if (value <= 0) return;
-
-  const earned = Math.round(value * sellMultiplier(state.run.upgrades, priceModifier()));
-  state.run.gold += earned;
-  state.run.totalSold += earned;
-  state.run.counters.totalGoldEarned += earned;
-  state.run.inventory.items = [];
-  audio.coin();
-  state.ui.message(`Мардо отсчитал ${earned} зм.`);
-  if (earned >= 120) noteStyle("sell_high");
-
-  if (world.wagonLooted && !state.run.lootSoldForTier) {
-    state.run.lootSoldForTier = true;
-    state.run.pendingCaravan = true;
-    state.run.caravanTimer = 12;
-    state.ui.message("Слух: на северной дороге скоро появится новый караван.");
-  }
-
-  state.ui.renderTrade(tradeState());
-  checkActProgress();
-  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+  trade.sellLoot(tradeCtx());
 }
 
 function buyerPrice(value) {
-  // Базовая цена продажи: та же, что показана на кнопке.
-  return Math.round(value * sellMultiplier(state.run.upgrades, priceModifier()));
+  return trade.buyerPrice(tradeCtx(), value);
 }
 
 // Торг: бросок кубика против Мардо. Выиграл — наценка, проиграл —
 // скидка. Продажа совершается сразу: иначе игрок мог бы бросить,
 // увидеть проигрыш и закрыть панель без последствий.
 function haggleSell() {
-  if (!state.ui.tradeOpen || !state.run) return;
-
-  const value = totalValue(state.run.inventory);
-  const left = rollsLeft(game.haggleRolled || 0);
-  if (!canHaggle(value, game.haggleRolled || 0)) {
-    if (value <= 0) state.ui.message("Продавать нечего.");
-    else state.ui.message("Мардо отворачивается: «Хватит. Цена окончательная.»");
-    return;
-  }
-
-  const result = rollHaggle(makeHaggleRng(state.run.seed, game.haggleRolled || 0, state.run.visitIndex || 0));
-  game.haggleRolled = (game.haggleRolled || 0) + 1;
-
-  const earned = haggledPrice(buyerPrice(value), result);
-  state.run.gold += earned;
-  state.run.totalSold += earned;
-  state.run.counters.totalGoldEarned += earned;
-  state.run.inventory.items = [];
-
-  audio.coin();
-  state.ui.message(`Мардо: ${rollText(result)}`);
-  state.ui.message(`Отсчитал ${earned} зм.`);
-  if (result.won) noteStyle("sell_high");
-
-  if (world.wagonLooted && !state.run.lootSoldForTier) {
-    state.run.lootSoldForTier = true;
-    state.run.pendingCaravan = true;
-    state.run.caravanTimer = 12;
-    state.ui.message("Слух: на северной дороге скоро появится новый караван.");
-  }
-
-  state.ui.renderTrade(tradeState());
-  checkActProgress();
-  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+  trade.haggleSell(tradeCtx());
 }
 
 function buyUpgrade(id) {
-  if (!state.ui.tradeOpen || !state.run) return;
-  if (!(id in state.run.upgrades)) return;
-  const result = purchase(state.run.gold, state.run.upgrades, id);
-  if (!result) return;
-  state.run.gold = result.gold;
-  state.run.upgrades = result.upgrades;
-  audio.coin();
-  state.ui.message(`Куплено улучшение.`);
-  state.ui.renderTrade(tradeState());
+  trade.buyUpgrade(tradeCtx(), id);
 }
 
 function buyUnlock(id) {
-  if (!state.ui.tradeOpen) return;
-  const next = unlock(state.profile, id);
-  if (!next) return;
-  state.profile = next;
-  audio.coin();
-  state.ui.message(`Открыто навсегда: ${id}.`);
-  state.ui.renderTrade(tradeState());
-  writeSave(state.profile, state.run ? snapshotRun(state.run, player) : null);
+  trade.buyUnlock(tradeCtx(), id);
 }
 
 function payFine() {
-  if (!state.ui.tradeOpen || !state.run) return;
-  const cost = fineFor(state.run.wanted);
-  if (cost <= 0) return;
-  if (state.run.gold < cost) {
-    state.ui.message("Не хватает золота на штраф.");
-    return;
-  }
-  state.run.gold -= cost;
-  state.run.wanted = 0;
-  const guard = world.villageGuard;
-  guard.state = "idle";
-  guard.suspicion = 0;
-  guard.alerted = false;
-  audio.coin();
-  state.ui.message("Штраф уплачен. Стража больше не ищет вас.");
-  state.ui.renderTrade(tradeState());
-  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
+  trade.payFine(tradeCtx());
 }
 
 // ── Обыск фургона ───────────────────────────────────────────────────
 
 function startLoot(second = false) {
-  const tier = state.run.tier;
-  // Раньше было `2 + tier`, и одновременно rollLoot умножал цену на
-  // 1 + (tier-1)*0.25. Два множителя по тиру сразу: на tier 3 доход
-  // удваивался скачком, и вся игра проходилась за пять караванов.
-  // Теперь количество растёт в полтора раза медленнее.
-  const count = 2 + Math.floor(tier / 2) + tuningFor(state.run.style).lootCount;
-  game.lootBuffer = rollLoot(tier, state.rng, count);
-  game.lootSecondWagon = second;
-
-  const witnessed = world.campGuards.some(
-    (a) => a.alive && (a.state === "chase" || a.suspicion > 0.4)
-  );
-  game.lootWitnessed = witnessed;
-  game.stealing = false;
-  game.stealProgress = 0;
-
-  game.uiOpen = true;
-  input.clear();
-  input.exitLock();
-  state.ui.openLoot(game.lootBuffer);
-  state.ui.setPrompt(null);
-  state.ui.setProgress(null);
+  trade.startLoot(tradeCtx(), second);
 }
 
 function takeLoot(index) {
-  if (!state.ui.lootOpen || !game.lootBuffer) return;
-  const item = game.lootBuffer[index];
-  if (!item) return;
-
-  if (!addItem(state.run.inventory, item)) {
-    state.ui.message("Не помещается — несите, что есть.");
-    return;
-  }
-  game.lootBuffer.splice(index, 1);
-  state.ui.renderLoot(game.lootBuffer);
-  if (game.lootBuffer.length === 0) finishLoot();
+  trade.takeLoot(tradeCtx(), index);
 }
 
 function finishLoot() {
-  if (!state.run) return;
-  const taken = state.run.inventory.items.length;
-  const wasSecond = game.lootSecondWagon;
-
-  if (wasSecond) {
-    if (world.secondWagon) world.secondWagon.looted = true;
-    state.run.secondWagonLooted = true;
-  } else {
-    world.wagonLooted = true;
-    state.run.wagonLooted = true;
-  }
-
-  const coin = 18 + state.run.tier * 8;
-  state.run.gold += coin;
-
-  if (game.lootWitnessed) {
-    state.run.wanted = Math.min(5, Math.max(state.run.wanted, 1));
-    noteStyle("witnessed");
-    state.ui.message("Стража видела ограбление! Розыск +1.");
-  } else {
-    noteStyle("silent_loot");
-    state.run.counters.silentLoots += 1;
-    const bonus = Math.round(coin * (tuningFor(state.run.style).silentBonus - 1));
-    if (bonus > 0) {
-      state.run.gold += bonus;
-      state.ui.message(`Тихо и чисто: +${bonus} зм. за бесшумность.`);
-    }
-  }
-
-  state.run.counters.lootsSinceAccept += 1;
-  game.lootBuffer = null;
-  game.lootSecondWagon = false;
-  game.lootWitnessed = false;
-  game.uiOpen = false;
-  state.ui.closeLoot();
-  audio.coin();
-  state.ui.message(`Из фургона вынесено ${taken} тюков и ${coin} зм.`);
-
-  evaluateContract();
-  checkActProgress();
-  saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-  input.requestLock();
+  trade.finishLoot(tradeCtx());
 }
 
 // ── Бой ─────────────────────────────────────────────────────────────
