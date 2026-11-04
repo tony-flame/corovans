@@ -1,7 +1,7 @@
 import { Renderer } from "./raycaster.js";
 import { Input } from "./input.js";
 import { Player } from "./player.js";
-import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor, ZONES, TILE } from "./world.js";
+import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor, TILE } from "./world.js";
 import { updateActors, maxSuspicion } from "./enemies.js";
 import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
@@ -23,7 +23,7 @@ import {
   ACTS,
   CHECKPOINT_REASONS,
 } from "./run.js";
-import { generateContracts, checkContract, rewardOf, contractName } from "./contracts.js";
+import { contractName } from "./contracts.js";
 import { phaseOf, pricesAt } from "./daynight.js";
 import { buildLightmap, AMBIENT } from "./lighting.js";
 import { createWeather, stepWeather, weatherLabel, isWet, setWeather } from "./weather.js";
@@ -96,7 +96,6 @@ import {
   makeHaggleRng,
 } from "./haggle.js";
 import {
-  checkQuest,
   questProgressText,
   canTakeQuest,
   QUEST_TYPES,
@@ -111,6 +110,7 @@ import { createState } from "./core/state.js";
 import * as trade from "./systems/trade.js";
 import * as combat from "./systems/combat.js";
 import * as dialogue from "./systems/dialogue.js";
+import * as progress from "./systems/progress.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -333,113 +333,23 @@ function styleKey() {
 // ── Контракты ───────────────────────────────────────────────────────
 
 function refreshContracts() {
-  if (!state.run) return;
-  if (state.run.activeContract) return;
-  state.run.contractOffer = generateContracts(state.run.seed, state.run.act, state.run.offerIndex, state.run.tier, styleKey());
-  state.run.offerSeed = state.run.contractOffer.length ? state.run.contractOffer[0].id : 0;
-  state.run.offerAct = state.run.act;
+  progress.refreshContracts(progressCtx());
 }
 
 function acceptContract(index) {
-  if (!state.ui.tradeOpen || !state.run) return;
-  const offer = state.run.contractOffer[index];
-  if (!offer || state.run.activeContract) return;
-
-  state.run.activeContract = { ...offer, state: "active", acceptedAt: state.run.dayTime, acceptedClock: game.clockTotal };
-  state.run.contractOffer = [];
-  state.run.counters.killsSinceAccept = 0;
-  state.run.counters.lootsSinceAccept = 0;
-  state.run.counters.chaseSinceAccept = false;
-  state.run.counters.driverKilledSinceAccept = false;
-  state.run.counters.acceptedAt = state.run.dayTime;
-  // Монотонный отпечаток времени: dayTime замыкается, clockTotal нет.
-  state.run.counters.acceptedClock = game.clockTotal;
-
-  audio.ui();
-  state.ui.message(`Взят заказ: ${contractName(offer.type)}. ${offer.description}`);
-  state.ui.renderTrade(tradeState());
-  saveCheckpoint(CHECKPOINT_REASONS.CONTRACT_ACCEPTED);
+  progress.acceptContract(progressCtx(), index);
 }
 
 function contractSnapshot() {
-  return {
-    kills: state.run.counters.kills,
-    killsSinceAccept: state.run.counters.killsSinceAccept,
-    lootsSinceAccept: state.run.counters.lootsSinceAccept,
-    chaseSinceAccept: state.run.counters.chaseSinceAccept,
-    driverKilledSinceAccept: state.run.counters.driverKilledSinceAccept,
-    items: state.run.inventory.items,
-    dayTime: state.run.dayTime,
-    acceptedAt: state.run.counters.acceptedAt,
-    // Монотонное время: не замыкается через 240 с, поэтому дедлайн
-    // нельзя обойти сменой суток.
-    clockTotal: game.clockTotal,
-    acceptedClock: state.run.counters.acceptedClock,
-  };
+  return progress.contractSnapshot(progressCtx());
 }
 
 function evaluateContract() {
-  if (!state.run || !state.run.activeContract) return;
-  const contract = state.run.activeContract;
-  const snap = contractSnapshot();
-  const result = checkContract(contract, snap);
-
-  if (contract.deadline && result.status === "active") {
-    // Остаток считается по тому же монотонному счётчику, иначе HUD врал.
-    const elapsed = Number.isFinite(state.run.counters.acceptedClock)
-      ? Math.max(0, game.clockTotal - state.run.counters.acceptedClock)
-      : Math.max(0, state.run.dayTime - contract.acceptedAt);
-    game.contractTimeLeft = Math.max(0, contract.deadline - elapsed);
-  } else {
-    game.contractTimeLeft = null;
-  }
-
-  if (result.status === "complete") {
-    finishContract(true);
-  } else if (result.status === "failed") {
-    finishContract(false, result.reason);
-  }
+  progress.evaluateContract(progressCtx());
 }
 
 function finishContract(success, reason = "") {
-  const contract = state.run.activeContract;
-  if (!contract) return;
-
-  if (success) {
-    const reward = rewardOf(contract, state.run.contractStreak);
-    state.run.gold += reward.gold;
-    state.run.contractStreak += 1;
-    state.run.counters.contractsDone += 1;
-    state.profile = {
-      ...state.profile,
-      reputation: (state.profile.reputation || 0) + reward.rep,
-      completedContracts: state.profile.completedContracts.includes(contract.id)
-        ? state.profile.completedContracts
-        : [...state.profile.completedContracts, contract.id],
-      stats: { ...state.profile.stats, contractsDone: (state.profile.stats.contractsDone || 0) + 1 },
-    };
-    noteStyle("contract_done");
-    if (contract.type === "clean" || contract.type === "unseen") noteStyle("clean_contract");
-    state.ui.message(`Заказ выполнен: +${reward.gold} зм., +${reward.rep} репутации.`);
-    audio.coin();
-  } else {
-    state.run.contractStreak = 0;
-    state.run.counters.contractsFailed += 1;
-    state.profile = {
-      ...state.profile,
-      stats: { ...state.profile.stats, contractsFailed: (state.profile.stats.contractsFailed || 0) + 1 },
-    };
-    noteStyle("contract_failed");
-    state.ui.message(`Заказ провален${reason ? `: ${reason}` : ""}.`);
-  }
-
-  state.run.activeContract = null;
-  game.contractTimeLeft = null;
-  state.run.offerIndex += 1;
-  refreshContracts();
-  checkActProgress();
-  saveCheckpoint(success ? CHECKPOINT_REASONS.CONTRACT_DONE : CHECKPOINT_REASONS.SOLD);
-  if (state.ui.tradeOpen) state.ui.renderTrade(tradeState());
+  progress.finishContract(progressCtx(), success, reason);
 }
 
 // ── Акты ────────────────────────────────────────────────────────────
@@ -1285,6 +1195,22 @@ function priceModifier() {
   return (1 + bonuses().priceBonus) * pricesAt(state.run.dayTime) * tuningFor(state.run.style).priceBonus;
 }
 
+// Контекст для systems/progress.js.
+function progressCtx() {
+  return {
+    state,
+    game,
+    world,
+    player,
+    audio,
+    styleKey,
+    checkActProgress,
+    noteStyle,
+    saveCheckpoint,
+    tradeState,
+  };
+}
+
 // Контекст для systems/dialogue.js.
 function dialogCtx() {
   return {
@@ -1337,26 +1263,14 @@ function tradeCtx() {
 }
 
 function questSnapshot() {
-  return {
-    beastsSince: (state.run.quest && state.run.quest.beasts) || {},
-    items: state.run.inventory.items,
-    visited: (state.run.quest && state.run.quest.visited) || {},
-    askedPeople: (state.run.quest && state.run.quest.askedPeople) || [],
-  };
+  return progress.questSnapshot(progressCtx());
 }
 
 // Проверяет активное задание и, если оно выполнилось, помечает.
 // Награду не выдаёт: за ней надо вернуться к жителю, иначе задание
 // закрывалось бы само где-нибудь в лесу без всякого разговора.
 function refreshQuestState() {
-  const quest = state.run.quest && state.run.quest.active;
-  if (!quest || quest.state === "complete") return;
-  const result = checkQuest(quest, questSnapshot());
-  if (result.status === "complete") {
-    quest.state = "complete";
-    state.ui.message(`${quest.giverLabel}: «${questProgressText(quest, questSnapshot())}.» Вернитесь и расскажите.`);
-    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-  }
+  progress.refreshQuestState(progressCtx());
 }
 
 // Какие места считаются «посещёнными» для задания. Зоны берём из мира:
@@ -1368,22 +1282,7 @@ const VISIT_PLACES = {
 };
 
 function noteVisitedPlaces() {
-  const quest = state.run.quest && state.run.quest.active;
-  if (!quest || quest.type !== QUEST_TYPES.REACH) return;
-
-  const zoneName = VISIT_PLACES[quest.targetId];
-  const zone = zoneName ? ZONES[zoneName] : null;
-  if (!zone) return;
-  if (state.run.quest.visited[quest.targetId]) return;
-
-  if (
-    player.x >= zone.x0 && player.x <= zone.x1 &&
-    player.y >= zone.y0 && player.y <= zone.y1
-  ) {
-    state.run.quest.visited[quest.targetId] = true;
-    state.ui.message(`${quest.giverLabel}: вы дошли до места.`);
-    refreshQuestState();
-  }
+  progress.noteVisitedPlaces(progressCtx());
 }
 
 function trackFootsteps(dt) {
