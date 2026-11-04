@@ -21,9 +21,12 @@
   "scripts": {
     "start": "node scripts/serve.mjs",
     "start:python": "python -m http.server 8000",
+    "desktop": "node scripts/desktop.mjs",
+    "desktop:setup": "python -m venv .venv && .venv\\Scripts\\python.exe -m pip install --disable-pip-version-check -r desktop/requirements.txt",
+    "desktop:build": ".venv\\Scripts\\python.exe -m pip install nuitka && .venv\\Scripts\\python.exe -m nuitka --standalone --onefile --assume-yes-for-downloads --output-dir=dist-desktop --include-data-dir=src=src --include-data-dir=styles.css=styles.css --include-data-file=index.html=index.html --windows-console-mode=disable --windows-icon-from-ico=electron/icon.ico --output-filename=Corovans.exe desktop/main.py",
     "electron": "electron .",
     "icon": "node scripts/make-icon.mjs",
-    "dist": "electron-packager . Corovans --platform=win32 --arch=x64 --out=dist --overwrite --asar --app-version=0.1.0 --icon=electron/icon.ico --ignore=\"^/(tests|scripts|docs|\\.git|dist|node_modules/electron|node_modules/electron-packager)\" --ignore=\"^/(AGENTS|README|CONTRIBUTING|rw)\\.md$\" --ignore=\"^/package-lock\\.json$\" --ignore=\"\\.log$\" --ignore=\"^/\\.vscode\" --ignore=\"^/\\.idea\"",
+    "dist": "electron-packager . Corovans --platform=win32 --arch=x64 --out=dist --overwrite --asar --app-version=0.1.0 --icon=electron/icon.ico --ignore=\"^/(tests|scripts|docs|\\.git|dist|dist-desktop|node_modules/electron|node_modules/electron-packager|\\.venv)\" --ignore=\"^/(AGENTS|README|CONTRIBUTING|rw)\\.md$\" --ignore=\"^/package-lock\\.json$\" --ignore=\"\\.log$\" --ignore=\"^/\\.vscode\" --ignore=\"^/\\.idea\"",
     "check": "node scripts/check.mjs && node scripts/check-refs.mjs src",
     "test": "node --test",
     "verify": "npm run check && npm test"

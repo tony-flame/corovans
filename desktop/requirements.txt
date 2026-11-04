@@ -1,0 +1,2 @@
+pywebview>=5.0,<7
+pythonnet>=3.0,<3.1

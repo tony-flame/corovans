@@ -21,6 +21,37 @@ html, body {
   user-select: none;
 }
 
+/* Полосы прокрутки в панелях: нативные выглядят как браузерные и
+   выбиваются из игры. В WebView2 (десктопная сборка) это особенно
+   заметно — там полоса светлая и широкая. */
+.panel::-webkit-scrollbar,
+.list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.panel::-webkit-scrollbar-track,
+.list::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.panel::-webkit-scrollbar-thumb,
+.list::-webkit-scrollbar-thumb {
+  background: #4a3a22;
+  border: 1px solid #2a1f10;
+}
+
+.panel::-webkit-scrollbar-thumb:hover,
+.list::-webkit-scrollbar-thumb:hover {
+  background: #6a5330;
+}
+
+/* Firefox и старые движки. */
+.panel,
+.list {
+  scrollbar-width: thin;
+  scrollbar-color: #4a3a22 rgba(0, 0, 0, 0.35);
+}
+
 #stage {
   position: relative;
   width: 100vw;

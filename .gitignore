@@ -13,3 +13,12 @@ dist/
 *.tmp
 *.bak
 scratch/
+
+# Python-окружение для десктопной сборки (pywebview + Nuitka)
+.venv/
+__pycache__/
+*.pyc
+
+# Готовый exe десктопной сборки
+dist-desktop/
+
