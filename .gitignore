@@ -1,24 +1,38 @@
+# npm
 node_modules/
+package-lock.json.bak
+
+# Логи и системный мусор
 *.log
+*.tmp
+*.bak
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Собранное приложение
+# Собранное приложение (Electron)
 dist/
 
-# Локальные заметки и артефакты отладки
-.idea/
-.vscode/
-*.tmp
-*.bak
-scratch/
+# Собранное приложение (WebView2 / Nuitka)
+dist-desktop/
 
-# Python-��������� ��� ���������� ������ (pywebview + Nuitka)
+# Python-окружение для десктопной сборки
 .venv/
 __pycache__/
 *.pyc
+*.pyo
 
-# ������� exe ���������� ������
-dist-desktop/
+# Кеш и промежуточные файлы Nuitka
+*.build/
+*.dist/
+*.onefile-build/
 
+# Локальные заметки и настройки редакторов
+.idea/
+.vscode/
+scratch/
+rw.md
+rw2.md
+
+# Служебное окружения агента
+.opencode/
