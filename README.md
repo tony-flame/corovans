@@ -30,9 +30,17 @@
 |---|---|
 | ![Деревня](docs/screenshots/01-village-day.jpg) | ![Дождь](docs/screenshots/02-fachwerk-rain.jpg) |
 
-| Ночь на стоянке | Тракт |
+| Стоянка на закате | Тракт |
 |---|---|
-| ![Ночь](docs/screenshots/03-night-camp.jpg) | ![Дорога](docs/screenshots/04-road.jpg) |
+| ![Стоянка](docs/screenshots/03-night-camp.jpg) | ![Дорога](docs/screenshots/04-road.jpg) |
+
+| Собор изнутри | Куртизанка на площади |
+|---|---|
+| ![Собор](docs/screenshots/06-cathedral.jpg) | ![Куртизанка](docs/screenshots/05-courtesan.jpg) |
+
+| Разговор с жителем | Скупщик и торг |
+|---|---|
+| ![Диалог](docs/screenshots/08-dialog.jpg) | ![Торговля](docs/screenshots/09-trade.jpg) |
 
 ## Запуск
 
