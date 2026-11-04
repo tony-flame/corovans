@@ -5,9 +5,8 @@ import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor
 import { updateActors, maxSuspicion } from "./enemies.js";
 import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
-import { addItem, totalValue, rollLoot } from "./inventory.js";
-import { purchase, fineFor, sellMultiplier } from "./economy.js";
-import { damageRoll, inMeleeCone, attackCooldown, stealTime, applyArmor, blockAbsorb, blockFacingDot } from "./combat.js";
+import { addItem } from "./inventory.js";
+import { stealTime } from "./combat.js";
 import { createRng, makeRunSeed, hashSeed } from "./rng.js";
 import { recordEvent, tuningFor, dominantArchetype, STYLE_LABELS } from "./style.js";
 import { applyRun, unlock, startingBonuses } from "./profile.js";
@@ -49,7 +48,6 @@ import {
   mountReasonText,
   horseSpeed,
   allowsAtMount,
-  mountedDamage,
   HORSE_CAMERA_LIFT,
 } from "./horse.js";
 import { buildCourtesan } from "./sprites.js";
@@ -57,7 +55,6 @@ import {
   SPECIES_DEFS,
   createAnimal,
   stepAnimal,
-  animalOnHit,
   bleedTick,
   applyBleed,
   bestFood,
@@ -118,6 +115,7 @@ import {
 } from "./ambience.js";
 import { createState } from "./core/state.js";
 import * as trade from "./systems/trade.js";
+import * as combat from "./systems/combat.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -418,12 +416,12 @@ function finishContract(success, reason = "") {
     state.run.contractStreak += 1;
     state.run.counters.contractsDone += 1;
     state.profile = {
-      ...profile,
+      ...state.profile,
       reputation: (state.profile.reputation || 0) + reward.rep,
       completedContracts: state.profile.completedContracts.includes(contract.id)
         ? state.profile.completedContracts
-        : [...profile.completedContracts, contract.id],
-      stats: { ...profile.stats, contractsDone: (state.profile.stats.contractsDone || 0) + 1 },
+        : [...state.profile.completedContracts, contract.id],
+      stats: { ...state.profile.stats, contractsDone: (state.profile.stats.contractsDone || 0) + 1 },
     };
     noteStyle("contract_done");
     if (contract.type === "clean" || contract.type === "unseen") noteStyle("clean_contract");
@@ -433,8 +431,8 @@ function finishContract(success, reason = "") {
     state.run.contractStreak = 0;
     state.run.counters.contractsFailed += 1;
     state.profile = {
-      ...profile,
-      stats: { ...profile.stats, contractsFailed: (state.profile.stats.contractsFailed || 0) + 1 },
+      ...state.profile,
+      stats: { ...state.profile.stats, contractsFailed: (state.profile.stats.contractsFailed || 0) + 1 },
     };
     noteStyle("contract_failed");
     state.ui.message(`Заказ провален${reason ? `: ${reason}` : ""}.`);
@@ -1009,9 +1007,9 @@ function applyDialogEffect(effect) {
     const reward = questReward(quest);
     state.run.gold += reward.gold;
     state.profile = {
-      ...profile,
+      ...state.profile,
       reputation: (state.profile.reputation || 0) + reward.rep,
-      stats: { ...profile.stats },
+      stats: { ...state.profile.stats },
     };
     state.run.quest.active = null;
     state.ui.message(`Задание выполнено: +${reward.gold} зм., +${reward.rep} репутации.`);
@@ -1036,9 +1034,9 @@ function applyDialogEffect(effect) {
   // Милостыня: репутация растёт, деньги уже списаны.
   if (effect.rep) {
     state.profile = {
-      ...profile,
+      ...state.profile,
       reputation: (state.profile.reputation || 0) + effect.rep,
-      stats: { ...profile.stats },
+      stats: { ...state.profile.stats },
     };
     state.ui.message(`Вы подали монету. +${effect.rep} репутации.`);
     saveCheckpoint(CHECKPOINT_REASONS.SOLD);
@@ -1196,7 +1194,10 @@ function titanDeath() {
   state.ui.setProgress(null);
   audio.death();
 
-  state.profile = { ...profile, stats: { ...profile.stats, deaths: (state.profile.stats.deaths || 0) + 1 } };
+  state.profile = {
+    ...state.profile,
+    stats: { ...state.profile.stats, deaths: (state.profile.stats.deaths || 0) + 1 },
+  };
   writeSave(state.profile, null);
 
   state.ui.showEnd(
@@ -1414,6 +1415,23 @@ function priceModifier() {
   return (1 + bonuses().priceBonus) * pricesAt(state.run.dayTime) * tuningFor(state.run.style).priceBonus;
 }
 
+// Контекст для systems/combat.js.
+function combatCtx() {
+  return {
+    state,
+    game,
+    world,
+    player,
+    audio,
+    noteStyle,
+    saveCheckpoint,
+    evaluateContract,
+    checkActProgress,
+    die,
+    refreshQuestState,
+  };
+}
+
 // Контекст для systems/trade.js: модуль не знает про main.js и не держит
 // состояния, всё необходимое приходит сюда.
 function tradeCtx() {
@@ -1554,250 +1572,24 @@ function finishLoot() {
 // ── Бой ─────────────────────────────────────────────────────────────
 
 function performAttack() {
-  if (player.attackCd > 0 || player.dead || player.blocking) return;
-
-  // Титан неуязвим: удар просто отскакивает, но кулдаун тратится.
-  const titan = world.titan;
-  if (
-    titan &&
-    titan.alive &&
-    Math.hypot(titan.x - player.x, titan.y - player.y) < 2.6
-  ) {
-    player.attackCd = attackCooldown(state.run.upgrades.sword);
-    player.swingT = 0.34;
-    audio.swing();
-    audio.hit();
-    state.ui.message("Клинок отскакивает, будто от скалы. Его нельзя убить.");
-    return;
-  }
-
-  player.attackCd = attackCooldown(state.run.upgrades.sword);
-  player.swingT = 0.34;
-  audio.swing();
-  game.noiseTimer = 0.5;
-
-  let target = null;
-  let bestDist = Infinity;
-  let targetIsAnimal = false;
-
-  for (const actor of world.actors) {
-    if (!actor.alive || actor.kind === "merchant" || actor.kind === "courtesan") continue;
-    if (
-      inMeleeCone(
-        player.x,
-        player.y,
-        player.dirX,
-        player.dirY,
-        actor.x,
-        actor.y,
-        1.95,
-        0.4
-      )
-    ) {
-      const dist = Math.hypot(actor.x - player.x, actor.y - player.y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        target = actor;
-        targetIsAnimal = false;
-      }
-    }
-  }
-
-  // Живность — тоже цель, но отдельным проходом: у неё свой код урона.
-  for (const animal of world.animals || []) {
-    if (!animal.alive) continue;
-    if (
-      inMeleeCone(
-        player.x,
-        player.y,
-        player.dirX,
-        player.dirY,
-        animal.x,
-        animal.y,
-        1.95,
-        0.4
-      )
-    ) {
-      const dist = Math.hypot(animal.x - player.x, animal.y - player.y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        target = animal;
-        targetIsAnimal = true;
-      }
-    }
-  }
-
-  if (!target) {
-    alertNoise(player.x, player.y, 7);
-    return;
-  }
-
-  // С седла бьёшь хуже: замах короче, опора хуже.
-  const baseDmg = damageRoll(12 + state.run.upgrades.sword * 5, state.rng);
-  const dmg = game.mounted ? mountedDamage(baseDmg) : baseDmg;
-
-  if (targetIsAnimal) {
-    state.ui.flashHit();
-    audio.hit();
-    const result = animalOnHit(target, dmg);
-    if (result.killed) {
-      killAnimal(result.animal, result.drops);
-    } else {
-      state.ui.message(`Вы ранили ${SPECIES_DEFS[target.kind].label.toLowerCase()} (-${dmg}).`);
-      audio.beast?.(target.kind);
-    }
-    return;
-  }
-
-  target.hp -= dmg;
-  if (target.asleep) target.asleep = false;
-  state.ui.flashHit();
-  // Стражник хрипит от попадания, обычные цели — просто удар.
-  if (target.kind === "guard" || target.kind === "village_guard" || target.kind === "driver") {
-    audio.guardHit();
-  } else {
-    audio.hit();
-  }
-  alertNoise(player.x, player.y, 9);
-
-  if (target.hp <= 0) {
-    killActor(target);
-    return;
-  }
-
-  if (target.kind === "guard") {
-    target.state = "chase";
-    target.suspicion = 1.2;
-    target.alerted = true;
-    target.lostTimer = 0;
-    game.onGuardAlert?.(target);
-  } else if (target.kind === "driver") {
-    target.state = "flee";
-    target.suspicion = 1;
-  } else if (target.kind === "village_guard") {
-    target.state = "chase";
-    target.suspicion = 1.2;
-    target.lostTimer = 0;
-    state.run.wanted = Math.min(5, state.run.wanted + 1);
-  }
-
-  const label = target.kind === "driver" ? "возницу" : "стражника";
-  state.ui.message(`Вы ранили ${label} (-${dmg}).`);
+  combat.performAttack(combatCtx());
 }
 
 // Убийство животного: добыча в инвентарь, розыск НЕ начисляется.
 function killAnimal(animal, drops) {
-  const def = SPECIES_DEFS[animal.kind];
-  let taken = 0;
-
-  // Задание на охоту: считаем по видам, а не «всего зверей».
-  if (state.run.quest && state.run.quest.active && state.run.quest.active.type === QUEST_TYPES.HUNT) {
-    state.run.quest.beasts[animal.kind] = (state.run.quest.beasts[animal.kind] || 0) + 1;
-    refreshQuestState();
-  }
-
-  for (const drop of drops) {
-    if (addItem(state.run.inventory, drop)) taken++;
-  }
-
-  const value = drops.reduce((sum, d) => sum + d.value, 0);
-  state.ui.message(
-    taken > 0
-      ? `Вы убили ${def.label.toLowerCase()}. Добыча: ${drops.map((d) => d.name).join(", ")} (${value} зм.).`
-      : `Вы убили ${def.label.toLowerCase()}, но добыча не поместилась.`
-  );
-  audio.coin();
+  combat.killAnimal(combatCtx(), animal, drops);
 }
 
 function alertNoise(x, y, radius) {
-  for (const actor of world.actors) {
-    if (!actor.alive) continue;
-    if (actor.kind !== "guard" && actor.kind !== "driver") continue;
-    const dist = Math.hypot(actor.x - x, actor.y - y);
-    if (dist <= radius) {
-      if (actor.kind === "driver") {
-        actor.state = "flee";
-        actor.suspicion = 1;
-      } else if (actor.state !== "chase") {
-        actor.state = "chase";
-        actor.suspicion = 1.2;
-        actor.alerted = true;
-        actor.lostTimer = 0;
-        actor.asleep = false;
-      }
-    }
-  }
+  combat.alertNoise(combatCtx(), x, y, radius);
 }
 
 function killActor(actor) {
-  actor.alive = false;
-  actor.hp = 0;
-  actor.state = "dead";
-
-  const tuning = tuningFor(state.run.style);
-  const drop = Math.round((6 + state.run.tier * 3 + Math.floor(state.rng() * 6)) * tuning.killDrop);
-  state.run.gold += drop;
-  state.run.wanted = Math.min(5, state.run.wanted + 1);
-  state.run.counters.kills += 1;
-  state.run.counters.killsSinceAccept += 1;
-  if (actor.kind === "driver") state.run.counters.driverKilledSinceAccept = true;
-  noteStyle("kill");
-  audio.guardDeath();
-  audio.coin();
-
-  const label =
-    actor.kind === "driver"
-      ? "возницу"
-      : actor.kind === "village_guard"
-        ? "городского стражника"
-        : "стражника";
-  state.ui.message(`Вы убили ${label}. Добыча: ${drop} зм. Розыск +1.`);
-  evaluateContract();
-  checkActProgress();
+  combat.killActor(combatCtx(), actor);
 }
 
 function damagePlayer(amount, source) {
-  if (player.dead || game.gameOver) return;
-  // Режим разработчика: урон не проходит.
-  if (game.godMode) return;
-
-  let raw = damageRoll(amount, state.rng);
-
-  // Блок гасит урон только спереди и тратит выносливость.
-  if (player.blocking && source && Number.isFinite(source.x)) {
-    const dot = blockFacingDot(player.x, player.y, player.dirX, player.dirY, source.x, source.y);
-    const result = blockAbsorb(raw, player.stamina, dot);
-    if (result.blocked) {
-      player.stamina = result.stamina;
-      raw = result.damage;
-      if (result.broke) {
-        player.blockBroke = 0.5;
-        state.ui.message("Блок пробит — выносливость на нуле!");
-        audio.hit();
-      } else {
-        audio.block();
-      }
-    }
-  }
-
-  const dmg = applyArmor(raw, state.run.upgrades.armor);
-  // Запас бодрости принимает удар первым, здоровье — остатком.
-  const absorbed = absorbWithOverheal(dmg, player.health, player.overheal);
-  player.health = absorbed.health;
-  player.overheal = absorbed.overheal;
-  player.hurtFlash = 1;
-  if (!player.blocking) audio.hurt();
-  noteStyle("damage_taken");
-
-  const label =
-    source?.kind === "village_guard"
-      ? "Городской стражник"
-      : source?.kind === "driver"
-        ? "Возница"
-        : "Стражник";
-  state.ui.message(`${label} ранил вас (-${dmg}).`);
-
-  if (player.health <= 0) die();
+  combat.damagePlayer(combatCtx(), amount, source);
 }
 
 // Мягкая смерть: откат на чекпоинт, минус 20% золота и вся переносимая добыча.
@@ -1815,7 +1607,10 @@ function die() {
   state.ui.setProgress(null);
   audio.death();
 
-  state.profile = { ...profile, stats: { ...profile.stats, deaths: (state.profile.stats.deaths || 0) + 1 } };
+  state.profile = {
+    ...state.profile,
+    stats: { ...state.profile.stats, deaths: (state.profile.stats.deaths || 0) + 1 },
+  };
 
   // Берём последний чекпоинт и применяем штраф уже к нему,
   // иначе перезагрузка вернула бы потерянное золото.
