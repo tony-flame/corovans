@@ -5,7 +5,6 @@ import { createWorld, nearestInteraction, spawnCamp, tileAt, canStand, moveActor
 import { updateActors, maxSuspicion } from "./enemies.js";
 import { UI } from "./ui.js";
 import { AudioSys } from "./audio.js";
-import { addItem } from "./inventory.js";
 import { stealTime } from "./combat.js";
 import { createRng, makeRunSeed, hashSeed } from "./rng.js";
 import { recordEvent, tuningFor, dominantArchetype, STYLE_LABELS } from "./style.js";
@@ -86,9 +85,6 @@ import {
 import {
   buildCivilianDialogue,
   buildCourtesanDialogue,
-  dialogueView,
-  chooseOption,
-  currentNode,
 } from "./dialog.js";
 import {
   rollHaggle,
@@ -100,10 +96,8 @@ import {
   makeHaggleRng,
 } from "./haggle.js";
 import {
-  makeQuest,
   checkQuest,
   questProgressText,
-  questReward,
   canTakeQuest,
   QUEST_TYPES,
 } from "./quests.js";
@@ -116,6 +110,7 @@ import {
 import { createState } from "./core/state.js";
 import * as trade from "./systems/trade.js";
 import * as combat from "./systems/combat.js";
+import * as dialogue from "./systems/dialogue.js";
 
 // Метка сборки: видна в консоли и в window.__corovans.build.
 // Не совпала с ожидаемой — браузер играет закешированные модули.
@@ -845,7 +840,9 @@ function talkToCourtesan() {
   const variant = courtesan.variant;
   const key = courtesan.spot || "square";
   const free = isFreeVisit(state.run.courtesanAffinity, key);
-  const state = buildCourtesanDialogue(variant, {
+  // Имя НЕ `state`: оно затеняло бы контейнер состояния, и `state.run`
+  // ниже читал бы дерево диалога — падение на первом же обращении.
+  const tree = buildCourtesanDialogue(variant, {
     ...dialogContext(),
     free,
     knownIntel: state.run.intel || {},
@@ -857,7 +854,7 @@ function talkToCourtesan() {
     personId: courtesan.id,
     label: variant.displayName,
     greetLine: "",
-    state,
+    state: tree,
     courtesanKey: key,
   };
   showDialog();
@@ -906,7 +903,8 @@ function dialogContext() {
 }
 
 function openCivilianDialog(person, greetLine) {
-  const state = buildCivilianDialogue(person.kind, {
+  // Имя НЕ `state`: см. комментарий в talkToCourtesan.
+  const tree = buildCivilianDialogue(person.kind, {
     ...dialogContext(),
     // Визиты считаются по NPC, а не по общему счётчику куртизанки:
     // иначе деревня хором меняла бы реплики после каждого визита к ней.
@@ -925,7 +923,7 @@ function openCivilianDialog(person, greetLine) {
     // Житель нужен эффекту задания: по нему строится квест.
     giver: { id: person.id, kind: person.kind, label: person.label },
     greetLine,
-    state,
+    state: tree,
   };
   game.uiOpen = true;
   input.clear();
@@ -937,147 +935,19 @@ function openCivilianDialog(person, greetLine) {
 }
 
 function showDialog() {
-  const d = game.dialog;
-  if (!d) return;
-  const view = dialogueView(d.state, state.run.gold);
-  const title = d.kind === "courtesan" ? d.label : `${d.label}`;
-  const text = d.state.history.length === 0 && d.greetLine
-    ? `${d.greetLine}\n\n${view.text}`
-    : view.text;
-  state.ui.openDialog({ title, text, options: view.options });
+  dialogue.showDialog(dialogCtx());
 }
 
 function chooseDialogOption(optionId) {
-  const d = game.dialog;
-  if (!d) return;
-
-  const node = currentNode(d.state);
-  const option = node ? (node.options || []).find((o) => o.id === optionId) : null;
-  if (!option) return;
-
-  const result = chooseOption(d.state, optionId, state.run.gold);
-  if (result.error) return;
-
-  // Сначала списываем деньги: эффект применяется уже к оплаченному.
-  const cost = option.cost || 0;
-  if (cost > 0) {
-    if (state.run.gold < cost) return;
-    state.run.gold -= cost;
-    audio.coin();
-  }
-
-  d.state = result.state;
-  applyDialogEffect(result.effect);
-
-  if (result.done) {
-    closeDialogPanel();
-    if (d.kind === "civilian") {
-      state.ui.message(`${d.label}: разговор окончен.`);
-    }
-    return;
-  }
-
-  showDialog();
+  dialogue.chooseDialogOption(dialogCtx(), optionId);
 }
 
 function applyDialogEffect(effect) {
-  if (!effect) return;
-
-  // Взяли задание у жителя.
-  if (effect.takeQuest) {
-    const giver = game.dialog && game.dialog.giver;
-    if (giver) {
-      const quest = makeQuest(state.run.seed, giver, 0);
-      if (quest) {
-        state.run.quest.active = { ...quest, state: "active" };
-        state.run.quest.beasts = {};
-        state.run.quest.visited = {};
-        state.run.quest.askedPeople = [];
-        state.ui.message(`${giver.label}: задание взято — ${quest.description.toLowerCase()}.`);
-        saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-      }
-    }
-    return;
-  }
-
-  // Сдали задание.
-  if (effect.claimQuest) {
-    const quest = state.run.quest && state.run.quest.active;
-    if (!quest) return;
-    const reward = questReward(quest);
-    state.run.gold += reward.gold;
-    state.profile = {
-      ...state.profile,
-      reputation: (state.profile.reputation || 0) + reward.rep,
-      stats: { ...state.profile.stats },
-    };
-    state.run.quest.active = null;
-    state.ui.message(`Задание выполнено: +${reward.gold} зм., +${reward.rep} репутации.`);
-    audio.coin();
-    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-    return;
-  }
-
-  // Хлеб у торговки: еда в инвентарь, без наценки.
-  if (effect.food) {
-    const item = { id: `bread-${state.run.visitIndex || 0}`, name: "Хлеб", value: 4, weight: 0.6, kind: "food", heal: 12 };
-    if (!addItem(state.run.inventory, item)) {
-      state.ui.message("Руки заняты. Хлеб остался у неё.");
-      state.run.gold += 3;
-    } else {
-      state.ui.message("Вы купили хлеб.");
-      saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-    }
-    return;
-  }
-
-  // Милостыня: репутация растёт, деньги уже списаны.
-  if (effect.rep) {
-    state.profile = {
-      ...state.profile,
-      reputation: (state.profile.reputation || 0) + effect.rep,
-      stats: { ...state.profile.stats },
-    };
-    state.ui.message(`Вы подали монету. +${effect.rep} репутации.`);
-    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-    return;
-  }
-
-  // Благословение: разовое лечение.
-  if (effect.bless) {
-    const heal = Math.min(20, player.maxHealth - player.health);
-    player.health = Math.min(player.maxHealth, player.health + 20);
-    state.ui.message(heal > 0 ? `Благословение: +${heal} здоровья.` : "Благословение принято.");
-    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-    return;
-  }
-
-  // Купленный факт у куртизанки: запоминаем в ране.
-  if (effect.intel) {
-    state.run.intel = { ...(state.run.intel || {}), [effect.intel]: true };
-    state.ui.message(`Запомнили: ${INTEL_SUMMARY[effect.intel] || "сведения записаны."}`);
-    saveCheckpoint(CHECKPOINT_REASONS.SOLD);
-  }
+  dialogue.applyDialogEffect(dialogCtx(), effect);
 }
 
-const INTEL_SUMMARY = {
-  guards: "смена часовых короткая — охраны много.",
-  sleeper: "один из охраны спит по-настоящему.",
-  titan: "титан не подходит к фургону и ждёт.",
-  mardo: "Мардо не взвешивает товар, а оценивает покупателя.",
-};
-
 function closeDialogPanel() {
-  state.ui.closeDialog();
-  if (game.dialog && game.dialog.kind === "courtesan") {
-    // Диалог куртизанки закрыт — возвращаться в её панель через E нельзя,
-    // иначе activeCourtesan останется висеть и следующий E откроет чужой разговор.
-    game.activeCourtesan = null;
-    game.courtesanRumorUsed = false;
-  }
-  game.dialog = null;
-  game.uiOpen = false;
-  input.requestLock();
+  dialogue.closeDialogPanel(dialogCtx());
 }
 
 // ── Консоль разработчика ─────────────────────────────────────────────
@@ -1413,6 +1283,20 @@ function tradeState() {
 
 function priceModifier() {
   return (1 + bonuses().priceBonus) * pricesAt(state.run.dayTime) * tuningFor(state.run.style).priceBonus;
+}
+
+// Контекст для systems/dialogue.js.
+function dialogCtx() {
+  return {
+    state,
+    game,
+    world,
+    player,
+    input,
+    audio,
+    refreshQuestState,
+    saveCheckpoint,
+  };
 }
 
 // Контекст для systems/combat.js.
