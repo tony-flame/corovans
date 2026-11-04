@@ -30,7 +30,7 @@ if (!existsSync(VENV_PYW)) {
   fail(
     "нет .venv с pywebview. Выполните один раз:\n" +
       "  npm run desktop:setup\n" +
-      "или просто запустите Корованы.cmd — он всё сделает сам."
+      "или просто запустите build.cmd — он всё сделает сам."
   );
 }
 
